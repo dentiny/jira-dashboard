@@ -57,6 +57,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_activity_ticket ON activity(ticket_id);
 `);
 
+// Migration: add type/options columns to questions (added 2026-06-27)
+try { db.exec(`ALTER TABLE questions ADD COLUMN type TEXT DEFAULT 'free_text'`); } catch {}
+try { db.exec(`ALTER TABLE questions ADD COLUMN options TEXT`); } catch {}
+
+// Migration: add stage column to activity for per-stage resource tracking
+try { db.exec(`ALTER TABLE activity ADD COLUMN stage TEXT`); } catch {}
+
 // ── Prepared statements ───────────────────────────────────
 const stmts = {
   // Tickets
@@ -91,8 +98,8 @@ const stmts = {
 
   // Questions
   insertQuestion: db.prepare(`
-    INSERT INTO questions (ticket_id, question, answer, round)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO questions (ticket_id, question, answer, round, type, options)
+    VALUES (?, ?, ?, ?, ?, ?)
   `),
   getQuestions: db.prepare(`
     SELECT * FROM questions WHERE ticket_id = ? ORDER BY id
@@ -106,8 +113,8 @@ const stmts = {
 
   // Activity
   insertActivity: db.prepare(`
-    INSERT INTO activity (ticket_id, action, detail, time)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO activity (ticket_id, action, detail, stage, time)
+    VALUES (?, ?, ?, ?, ?)
   `),
   getActivity: db.prepare(`
     SELECT * FROM activity WHERE ticket_id = ? ORDER BY time DESC LIMIT 500
@@ -132,7 +139,10 @@ function getUpdateFieldStmt(field) {
 function getTicket(id) {
   const row = stmts.getTicket.get(id);
   if (!row) return null;
-  row.questions = stmts.getQuestions.all(id);
+  row.questions = stmts.getQuestions.all(id).map(q => ({
+    ...q,
+    options: q.options ? JSON.parse(q.options) : undefined
+  }));
   row.activity = stmts.getActivity.all(id);
   row.token_usage = (row.token_cost != null) ? {
     cost: String(row.token_cost),
@@ -145,7 +155,10 @@ function getTicket(id) {
 function getAllTickets() {
   const tickets = stmts.getAllTickets.all();
   for (const t of tickets) {
-    t.questions = stmts.getQuestions.all(t.id);
+    t.questions = stmts.getQuestions.all(t.id).map(q => ({
+      ...q,
+      options: q.options ? JSON.parse(q.options) : undefined
+    }));
     t.activity = stmts.getActivity.all(t.id);
     if (t.token_cost != null) {
       t.token_usage = {
@@ -202,8 +215,11 @@ function deleteQuestionsForTicket(ticketId) {
   stmts.deleteQuestions.run(ticketId);
 }
 
-function addQuestion(ticketId, questionText, answer, round) {
-  const info = stmts.insertQuestion.run(ticketId, questionText, answer || null, round || 1);
+function addQuestion(ticketId, questionText, answer, round, type, options) {
+  const info = stmts.insertQuestion.run(
+    ticketId, questionText, answer || null, round || 1,
+    type || 'free_text', options || null
+  );
   return Number(info.lastInsertRowid);
 }
 
@@ -211,8 +227,8 @@ function updateQuestionAnswer(questionId, ticketId, answer) {
   stmts.updateQuestionAnswer.run(answer, questionId, ticketId);
 }
 
-function logActivity(ticketId, action, detail) {
-  stmts.insertActivity.run(ticketId, action, detail || '', new Date().toISOString());
+function logActivity(ticketId, action, detail, stage = null) {
+  stmts.insertActivity.run(ticketId, action, detail || '', stage, new Date().toISOString());
 }
 
 function nextQuestionId() {
@@ -225,6 +241,102 @@ function getTicketIds() {
 
 function close() {
   db.close();
+}
+
+// ── Stage resource aggregation ────────────────────────────
+// Walks the activity log for a ticket and buckets every
+// `resource` entry into its tagged stage.  Within each stage,
+// the FIRST resource entry is the baseline and the LAST is
+// the final cumulative reading; delta between them is the
+// contribution of that stage.  For `stage_summary` entries
+// (which already carry delta totals per opencode call) we
+// sum the parsed fields directly — that handles the case
+// where a stage ran multiple opencode calls.
+//
+// Tokens / cost come from opencode's project-wide stats which
+// are absolute cumulative, so the same delta trick works.
+//
+// Returns:
+//   {
+//     clarification: { cpu, elapsed, peak_mem, tokens_in, tokens_out, cost, calls },
+//     implementation: { ... },
+//     total: { cpu, elapsed, peak_mem, tokens_in, tokens_out, cost, calls }
+//   }
+// Missing stages come back as null so the UI can render an
+// "n/a" cleanly.
+function _emptyBucket() { return { cpu: 0, elapsed: 0, peak_mem: 0, tokens_in: 0, tokens_out: 0, cost: 0, calls: 0 }; }
+
+function getStageResources(ticketId) {
+  const rows = stmts.getActivity.all(ticketId).slice().reverse(); // chronological
+  // group resource entries by stage, preserving order
+  const byStage = {};
+  let baselineByStage = {};   // first resource entry per stage (cumulative values)
+  for (const r of rows) {
+    if (r.action !== 'resource') continue;
+    const stage = r.stage || 'unknown';
+    if (!(stage in byStage)) { byStage[stage] = []; baselineByStage[stage] = null; }
+    byStage[stage].push(r);
+  }
+  const summary = { clarification: null, implementation: null, total: _emptyBucket() };
+  for (const [stage, entries] of Object.entries(byStage)) {
+    const bucket = _emptyBucket();
+    // cpu / elapsed / tokens come from delta(last - first)
+    const first = entries[0];
+    const last = entries[entries.length - 1];
+    const parseKv = (s) => Object.fromEntries((s || '').split(' ').map(k => k.split('=')));
+    const fp = parseKv(first.detail);
+    const lp = parseKv(last.detail);
+    bucket.cpu = Math.max(0, (parseFloat(lp.cpu) || 0) - (parseFloat(fp.cpu) || 0));
+    bucket.elapsed = Math.max(0, (parseInt(lp.elapsed) || 0) - (parseInt(fp.elapsed) || 0));
+    bucket.tokens_in = (lp.tokens_in || '').replace(/[,KMB]/g, '');
+    bucket.tokens_out = (lp.tokens_out || '').replace(/[,KMB]/g, '');
+    // cost is $-prefixed in the detail string
+    const parseCost = (s) => parseFloat((s || '').replace(/[$,]/g, '')) || 0;
+    bucket.cost = Math.max(0, parseCost(lp.cost) - parseCost(fp.cost));
+    // peak memory: max over all entries in this stage
+    for (const e of entries) {
+      const mem = parseFloat(parseKv(e.detail).mem) || 0;
+      if (mem > bucket.peak_mem) bucket.peak_mem = mem;
+    }
+    bucket.calls = 1; // single opencode session per stage typically; refined below via stage_summary
+    // If multiple distinct opencode calls happened in this stage
+    // (e.g. clarify + answer), the deltas above only capture the
+    // polling window of the last call.  Augment from stage_summary.
+    const summaries = rows.filter(r => r.action === 'stage_summary' && (r.stage || 'unknown') === stage);
+    if (summaries.length > 1) {
+      const sum = _emptyBucket();
+      for (const s of summaries) {
+        const sp = parseKv(s.detail);
+        sum.cpu += parseFloat(sp.cpu) || 0;
+        sum.elapsed += parseFloat(sp.elapsed) || 0;
+        sum.tokens_in += parseFloat((sp.tokens_in || '0').replace(/[,KMB]/g, '')) || 0;
+        sum.tokens_out += parseFloat((sp.tokens_out || '0').replace(/[,KMB]/g, '')) || 0;
+        sum.cost += parseCost(sp.cost);
+        const m = parseFloat(sp.peak_mem) || 0;
+        if (m > sum.peak_mem) sum.peak_mem = m;
+      }
+      sum.calls = summaries.length;
+      // Prefer summed stage_summary values when available
+      bucket.cpu = sum.cpu;
+      bucket.elapsed = sum.elapsed;
+      bucket.tokens_in = sum.tokens_in;
+      bucket.tokens_out = sum.tokens_out;
+      bucket.cost = sum.cost;
+      bucket.peak_mem = sum.peak_mem;
+      bucket.calls = sum.calls;
+    }
+    if (stage in summary) summary[stage] = bucket;
+    else summary[stage] = bucket;
+    // accumulate grand total
+    summary.total.cpu += bucket.cpu;
+    summary.total.elapsed += bucket.elapsed;
+    summary.total.tokens_in += bucket.tokens_in;
+    summary.total.tokens_out += bucket.tokens_out;
+    summary.total.cost += bucket.cost;
+    if (bucket.peak_mem > summary.total.peak_mem) summary.total.peak_mem = bucket.peak_mem;
+    summary.total.calls += bucket.calls;
+  }
+  return summary;
 }
 
 // ── Migration from JSON ───────────────────────────────────
@@ -311,6 +423,7 @@ module.exports = {
   updateQuestionAnswer,
   deleteQuestionsForTicket,
   logActivity,
+  getStageResources,
   nextQuestionId,
   getTicketIds,
   close,

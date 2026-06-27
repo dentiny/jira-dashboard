@@ -8,14 +8,20 @@ import {
 /* ─────────────────────────────────────────────────────────
    Domain types
    ───────────────────────────────────────────────────────── */
-interface Q { id: number; question: string; answer: string | null; round: number }
+interface Q { id: number; question: string; answer: string | null; round: number; type?: string; options?: string[] }
 interface A { action: string; detail: string; time: string }
+interface S {
+  cpu: number; elapsed: number; peak_mem: number;
+  tokens_in: string; tokens_out: string; cost: number; calls: number;
+}
+interface SR { clarification: S|null; implementation: S|null; total: S }
 interface T {
   id: string; title: string; content: string; stage: string; status?: string
   plan: string | null; worktree_path: string | null; branch_name: string | null
   commit_sha: string | null; review_feedback: string | null
   questions: Q[]; activity: A[]; created_at: string; updated_at: string
   total_cpu?: string; total_elapsed?: string
+  stage_resources?: SR
 }
 
 /* ─────────────────────────────────────────────────────────
@@ -147,6 +153,7 @@ function QuestionCard({
 }) {
   const [expanded, setExpanded] = useState(false)
   const long = q.question.length > 110
+  const isMC = q.type === 'multiple_choice' && q.options && q.options.length > 0
   return (
     <div className="rounded-lg ring-1 ring-zinc-200 bg-white p-3.5">
       <div className="flex gap-3">
@@ -172,6 +179,35 @@ function QuestionCard({
               <span className="t-mono-11 text-emerald-600 shrink-0 mt-0.5">A{index}</span>
               <p className="t-body text-emerald-900 leading-relaxed">{q.answer}</p>
             </div>
+          ) : isMC ? (
+            <fieldset className="mt-2 space-y-1">
+              {q.options!.map((opt, oi) => (
+                <label
+                  key={oi}
+                  className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md cursor-pointer transition-colors t-body ${
+                    answer === opt
+                      ? 'bg-zinc-900 text-white'
+                      : 'hover:bg-zinc-100 text-zinc-700'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name={`q-${q.id}`}
+                    value={opt}
+                    checked={answer === opt}
+                    onChange={e => onAnswer(e.target.value)}
+                    disabled={disabled}
+                    className="sr-only"
+                  />
+                  <span className={`h-3.5 w-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                    answer === opt ? 'border-white' : 'border-zinc-300'
+                  }`}>
+                    {answer === opt && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                  </span>
+                  {opt}
+                </label>
+              ))}
+            </fieldset>
           ) : (
             <input
               value={answer}
@@ -238,11 +274,23 @@ function ActivitySidebar({ items }: { items: A[] }) {
 /* ─────────────────────────────────────────────────────────
    Resource metrics — read from "resource" activity entries.
    ───────────────────────────────────────────────────────── */
+function fmtNum(v: number) { return v > 1000 ? v.toFixed(0) : v > 10 ? v.toFixed(1) : v.toFixed(2) }
+function fmtCost(c: number) { return c > 0 ? '$' + (c > 1 ? c.toFixed(2) : c.toFixed(4)) : '—' }
+
 function ResourceMetrics({
-  activity, totalCpu, totalElapsed,
-}: { activity: A[]; totalCpu?: string; totalElapsed?: string }) {
+  activity, stageResources, status,
+}: {
+  activity: A[]; stageResources?: SR; status?: string
+}) {
+  const sr = stageResources
   const r = (activity || []).filter(a => a.action === 'resource')
-  if (!r.length && !totalCpu && !totalElapsed) return null
+  const hasLive = r.length > 0 && status === 'running'
+  const hasFinished = sr && (sr.clarification || sr.implementation)
+  // Backward compat: old tickets have no per-stage tags but have total
+  const hasLegacyTotal = sr && sr.total.cpu > 0 && !hasFinished
+
+  if (!hasLive && !hasFinished && !hasLegacyTotal) return null
+
   const p = (s: string) => Object.fromEntries(s.split(' ').map(x => x.split('=')))
   const cur = r.length ? p(r[0].detail) : null
   const cpu = parseFloat(cur?.cpu) || 0
@@ -251,35 +299,89 @@ function ResourceMetrics({
   const cores = parseInt(cur?.ncores) || 8
   const prev = r.length > 1 ? p(r[1].detail) : null
   const dt = (el - (parseInt(prev?.elapsed) || 0)) || 3
-  const dcpu = (cpu - (parseFloat(prev?.cpu) || 0))
-  const rate = prev ? dcpu / dt : 0
-  const allMem = r.map(a => parseFloat(p(a.detail).mem) || 0)
-  const peak = Math.max(...allMem, mem)
-  const finished = !!(totalCpu || totalElapsed)
+  const rate = prev ? (cpu - (parseFloat(prev?.cpu) || 0)) / dt : cpu / el
   const cpuPct = Math.min(rate / cores * 100, 100)
-  const memPct = peak ? (mem / peak) * 100 : 0
+
+  const renderBucket = (label: string, s: S | null) => {
+    if (!s || s.cpu === 0) return null
+    const tag = s.calls > 1 ? `${s.calls} calls` : '1 call'
+    return (
+      <div className="space-y-1">
+        <h5 className="t-meta text-zinc-500 uppercase tracking-wider flex items-baseline gap-1.5">
+          {label} <span className="normal-case tracking-normal font-normal text-zinc-400">{tag}</span>
+        </h5>
+        <div className="grid grid-cols-2 gap-2">
+          <MetricCompact label="CPU"     value={`${fmtNum(s.cpu)}s`} />
+          <MetricCompact label="Elapsed" value={`${s.elapsed}s`} />
+          <MetricCompact label="Memory"  value={`${s.peak_mem.toFixed(0)} MB`} />
+          <MetricCompact label="Cost"    value={fmtCost(s.cost)} />
+          {s.tokens_in !== '0' && <MetricCompact label="Tokens" value={`${s.tokens_in} in · ${s.tokens_out} out`} />}
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="grid grid-cols-2 gap-3 t-small">
-      {finished ? (
-        <>
-          <Metric label="CPU total"   value={totalCpu || '—'} />
-          <Metric label="Elapsed"     value={totalElapsed || '—'} />
-          <Metric label="Memory peak" value={`${peak.toFixed(0)} MB`} barClass="bg-emerald-500" pct={100} />
-          {cur && <Metric label="Threads" value={cur.threads || '—'} />}
-          {cur?.tokens_in && <Metric label="Tokens" value={`${cur.tokens_in} in · ${cur.tokens_out} out`} />}
-          {cur?.cost && <Metric label="Cost" value={cur.cost} />}
-        </>
-      ) : (
-        <>
-          <Metric label="CPU rate"   value={`${rate > 0 ? rate.toFixed(1) : (cpu/el).toFixed(2)}/${cores} cores`} pct={cpuPct} barClass="bg-zinc-900" />
-          <Metric label="Memory"     value={`${mem.toFixed(0)} MB`}                                       pct={memPct} barClass="bg-emerald-500" sub={`peak ${peak.toFixed(0)}`} />
-          <Metric label="Threads"    value={cur?.threads || '—'} />
-          <Metric label="Elapsed"    value={`${cur?.elapsed || '—'}s`} />
-          {cur?.tokens_in && <Metric label="Tokens" value={`${cur.tokens_in} in · ${cur.tokens_out} out`} />}
-          {cur?.cost && <Metric label="Cost" value={cur.cost} />}
-        </>
+    <div className="space-y-3">
+      {/* Per-stage breakdown (clarification + implementation) */}
+      {hasFinished && (<>
+        {sr.clarification && renderBucket('Clarification', sr.clarification)}
+        {sr.implementation && renderBucket('Implementation', sr.implementation)}
+      </>)}
+
+      {/* Legacy total (old tickets without per-stage tags) */}
+      {hasLegacyTotal && (
+        <div className="grid grid-cols-2 gap-2">
+          <MetricCompact label="CPU total"   value={`${fmtNum(sr.total.cpu)}s`} />
+          <MetricCompact label="Elapsed"     value={`${sr.total.elapsed}s`} />
+          <MetricCompact label="Memory peak" value={`${sr.total.peak_mem.toFixed(0)} MB`} />
+          <MetricCompact label="Cost"        value={fmtCost(sr.total.cost)} />
+          {sr.total.tokens_in !== '0' && <MetricCompact label="Tokens" value={`${sr.total.tokens_in} in · ${sr.total.tokens_out} out`} />}
+        </div>
       )}
+
+      {/* Running metrics (live) shown below per-stage totals */}
+      {hasLive && (
+        <div className="rounded-md ring-1 ring-zinc-200 p-3 space-y-1">
+          <h5 className="t-meta text-zinc-500 uppercase tracking-wider">Live</h5>
+          <div className="grid grid-cols-2 gap-2">
+            <MetricCompact label="CPU rate" value={`${fmtNum(rate)}/${cores} cores`} />
+            <MetricCompact label="Memory"   value={`${mem.toFixed(0)} MB`} />
+            <MetricCompact label="Threads"  value={cur?.threads || '—'} />
+            <MetricCompact label="Elapsed"  value={`${el}s`} />
+            {cur?.tokens_in && <MetricCompact label="Tokens" value={`${cur.tokens_in} in · ${cur.tokens_out} out`} />}
+            {cur?.cost && <MetricCompact label="Cost" value={cur.cost} />}
+            {cpuPct !== undefined && (
+              <div className="col-span-2">
+                <div className="flex items-baseline justify-between t-meta text-zinc-500 uppercase tracking-wider font-medium">CPU util</div>
+                <div className="mt-1 h-1 rounded-full bg-zinc-100 overflow-hidden">
+                  <div className="h-full bg-zinc-900" style={{ width: cpuPct + '%' }} />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Grand total (shown when there's per-stage data) */}
+      {hasFinished && (
+        <div className="border-t border-zinc-200 pt-3 grid grid-cols-2 gap-2">
+          <MetricCompact label="CPU total"   value={`${fmtNum(sr.total.cpu)}s`} />
+          <MetricCompact label="Elapsed"     value={`${sr.total.elapsed}s`} />
+          <MetricCompact label="Memory peak" value={`${sr.total.peak_mem.toFixed(0)} MB`} />
+          <MetricCompact label="Cost"        value={fmtCost(sr.total.cost)} />
+          {sr.total.tokens_in !== '0' && <MetricCompact label="Tokens" value={`${sr.total.tokens_in} in · ${sr.total.tokens_out} out`} />}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MetricCompact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-x-2">
+      <span className="t-meta text-zinc-500 uppercase tracking-wider font-medium shrink-0">{label}</span>
+      <span className="t-mono-11 text-zinc-700 text-right break-words">{value}</span>
     </div>
   )
 }
@@ -723,7 +825,7 @@ export default function App() {
                           Implementing…
                         </div>
                         <div className="mt-3 rounded-lg ring-1 ring-zinc-200 p-3">
-                          <ResourceMetrics activity={sel.activity || []} totalCpu={sel.total_cpu} totalElapsed={sel.total_elapsed} />
+                          <ResourceMetrics activity={sel.activity || []} stageResources={sel.stage_resources} status={sel.status} />
                         </div>
                         {(() => {
                           const f = (sel.activity || []).filter(a => a.action === 'file_changed')
@@ -799,7 +901,7 @@ export default function App() {
                     {sel.worktree_path && (
                       <Section title="Resource usage">
                         <div className="rounded-md ring-1 ring-zinc-200 p-3">
-                          <ResourceMetrics activity={sel.activity || []} totalCpu={sel.total_cpu} totalElapsed={sel.total_elapsed} />
+                          <ResourceMetrics activity={sel.activity || []} stageResources={sel.stage_resources} status={sel.status} />
                         </div>
                       </Section>
                     )}
@@ -836,7 +938,7 @@ export default function App() {
                     )}
                     <Section title="Resource usage">
                       <div className="rounded-md ring-1 ring-zinc-200 p-3">
-                        <ResourceMetrics activity={sel.activity || []} totalCpu={sel.total_cpu} totalElapsed={sel.total_elapsed} />
+                        <ResourceMetrics activity={sel.activity || []} stageResources={sel.stage_resources} status={sel.status} />
                       </div>
                     </Section>
                     {sel.questions.length > 0 && (

@@ -61,7 +61,7 @@ function getOpencodeTokens() {
   } catch { return { cost: 0, input: '0', output: '0' }; }
 }
 
-function runOpenCode(ticketId, prompt, onProgress) {
+function runOpenCode(ticketId, prompt, onProgress, stage = null) {
   return new Promise((resolve, reject) => {
     const venvBin = path.join(PYXEN_DIR, '.venv', 'bin');
     const pyxenEnv = loadPyxenEnv();
@@ -83,11 +83,13 @@ function runOpenCode(ticketId, prompt, onProgress) {
     let stderr = '';
     let killed = false;
 
-    // Resource monitor
+    // Resource monitor — logs cpu/mem/tokens/tokens/cost every 3s,
+    // tagged with 'stage' so per-stage breakdown is always available.
     const startTime = Date.now();
     const clkTck = 100;
     const ncores = parseInt(fs.readFileSync('/proc/cpuinfo', 'utf-8').match(/processor/g)?.length) || 4;
     let baseCpu = 0, baseElapsed = 0;
+    let peakMem = 0;
     try {
       const t = db.getTicket(ticketId);
       if (t) {
@@ -107,18 +109,22 @@ function runOpenCode(ticketId, prompt, onProgress) {
         const threads = parseInt(fields[17]) || 1;
         const cpuSec = (baseCpu + (utime + stime) / clkTck).toFixed(1);
         const memMB = (rss * 4096 / (1024 * 1024)).toFixed(1);
+        if (memMB > peakMem) peakMem = memMB;
         const elapsed = baseElapsed + Math.round((Date.now() - startTime) / 1000);
 
-        let tokens = '';
+        let tokensIn = '', tokensOut = '', runCost = '';
         try {
           const statsOut = execSync(`${OPENCODE_BIN} stats --project ''`, { encoding: 'utf-8', timeout: 3000, stdio: 'pipe', cwd: PYXEN_DIR });
-          const inp = (statsOut.match(/Input\s+([\d,.]+[KMB]?)/) || [])[1];
-          const out = (statsOut.match(/Output\s+([\d,.]+[KMB]?)/) || [])[1];
-          const cost = (statsOut.match(/Total Cost\s+\$?([\d.]+)/) || [])[1];
-          if (inp) tokens = ` tokens_in=${inp} tokens_out=${out} cost=$${cost}`;
+          tokensIn = (statsOut.match(/Input\s+([\d,.]+[KMB]?)/) || [])[1] || '';
+          tokensOut = (statsOut.match(/Output\s+([\d,.]+[KMB]?)/) || [])[1] || '';
+          runCost = (statsOut.match(/Total Cost\s+\$?([\d.]+)/) || [])[1] || '';
         } catch {}
+        let tokensStr = '';
+        if (tokensIn) tokensStr = ` tokens_in=${tokensIn} tokens_out=${tokensOut} cost=$${runCost}`;
 
-        const resStr = `cpu=${cpuSec}s mem=${memMB}MB threads=${threads} elapsed=${elapsed}s ncores=${ncores}${tokens}`;
+        const resStr = `cpu=${cpuSec}s mem=${memMB}MB threads=${threads} elapsed=${elapsed}s ncores=${ncores}${tokensStr}`;
+        // Tag resource entries with stage for per-stage breakdown
+        db.logActivity(ticketId, 'resource', resStr, stage);
         if (onProgress) onProgress(`[resource] ${resStr}`);
       } catch { /* proc gone */ }
     }, 3000);
@@ -132,8 +138,30 @@ function runOpenCode(ticketId, prompt, onProgress) {
     });
     proc.stderr.on('data', d => { stderr += d.toString(); });
 
+    // Snapshot token/cost before this call (for stage_summary delta)
+    const tokensBefore = getOpencodeTokens();
+
     proc.on('close', code => {
       clearInterval(resMonitor);
+
+      // Compute per-stage delta summary
+      const tokensAfter = getOpencodeTokens();
+      let deltaCpu = '0', deltaElapsed = '0', deltaPeakMem = peakMem.toFixed(0);
+      let deltaCost = Math.max(0, tokensAfter.cost - tokensBefore.cost).toFixed(3);
+      try {
+        const t = db.getTicket(ticketId);
+        if (t) {
+          const resEntries = (t.activity || []).filter(a => a.action === 'resource' && a.stage === stage);
+          if (resEntries.length > 0) {
+            const latest = Object.fromEntries(resEntries[0].detail.split(' ').map(k => k.split('=')));
+            deltaCpu = Math.max(0, (parseFloat(latest.cpu) || 0) - baseCpu).toFixed(1);
+            deltaElapsed = String(Math.max(0, (parseInt(latest.elapsed) || 0) - baseElapsed));
+          }
+        }
+      } catch {}
+      const summaryStr = `cpu=${deltaCpu}s elapsed=${deltaElapsed}s peak_mem=${deltaPeakMem}MB tokens_in=${tokensAfter.input} tokens_out=${tokensAfter.output} cost=$${deltaCost}`;
+      db.logActivity(ticketId, 'stage_summary', summaryStr, stage);
+
       if (!killed) {
         if (code === 0) {
           if (!stdout.trim() && stderr.trim()) {
@@ -187,7 +215,8 @@ app.get('/api/tickets', (req, res) => {
 app.get('/api/tickets/:id', (req, res) => {
   const t = db.getTicket(req.params.id);
   if (!t) return res.status(404).json({ error: 'Ticket not found' });
-  res.json(t);
+  const stageResources = db.getStageResources(req.params.id);
+  res.json({ ...t, stage_resources: stageResources });
 });
 
 // ── Create ticket ─────────────────────────────────────────
@@ -221,16 +250,38 @@ Title: ${ticket.title}
 Content: ${ticket.content}${extraContext}
 
 Your job:
-1. Ask clarifying questions about what exactly needs to be done. Ask 3-5 focused questions.
-2. Format your response as a JSON object with a "questions" array. Each question should be a string.
-   Example: {"questions": ["Question 1?", "Question 2?"], "notes": "Optional context notes"}
+1. Ask clarifying questions about what exactly needs to be done. Ask as many as you genuinely need — no fixed minimum or maximum.
+2. For each question, decide the best answer format:
+   - free_text: the user types a free-form answer in a textbox
+   - multiple_choice: the user picks one option from a predefined list (2-5 options)
+3. Format your response as a JSON object:
+
+{
+  "questions": [
+    {
+      "question": "What approach should we use?",
+      "type": "multiple_choice",
+      "options": ["Approach A", "Approach B", "Approach C"]
+    },
+    {
+      "question": "Any additional details?",
+      "type": "free_text"
+    }
+  ],
+  "notes": "Optional context notes"
+}
+
+Rules:
+- Each question object MUST have "question" and "type" fields.
+- For "multiple_choice", include an "options" array with 2-5 strings.
+- For "free_text", do NOT include an "options" field.
 
 IMPORTANT: Output ONLY the JSON object, no other text.`;
 
   try {
     db.logActivity(ticket.id, 'clarify_start');
     db.updateTicketField(ticket.id, 'status', 'running');
-    const output = await runOpenCode(ticket.id, prompt);
+    const output = await runOpenCode(ticket.id, prompt, undefined, 'clarification');
     db.updateTicketField(ticket.id, 'status', 'idle');
 
     let parsed;
@@ -248,7 +299,13 @@ IMPORTANT: Output ONLY the JSON object, no other text.`;
     db.deleteQuestionsForTicket(ticket.id);
 
     for (const q of questions) {
-      db.addQuestion(ticket.id, q, null, 1);
+      if (typeof q === 'string') {
+        // Backward compat: plain string question
+        db.addQuestion(ticket.id, q, null, 1, 'free_text', null);
+      } else {
+        const opts = q.options && Array.isArray(q.options) ? JSON.stringify(q.options) : null;
+        db.addQuestion(ticket.id, q.question, null, 1, q.type || 'free_text', opts);
+      }
     }
     if (notes) db.logActivity(ticket.id, 'clarify_notes', notes);
 
@@ -300,15 +357,36 @@ ${qaText}
 
 Your job:
 1. Evaluate if you have enough information to create an implementation plan
-2. If you NEED MORE CLARIFICATION, respond with JSON: {"need_more": true, "questions": ["Follow-up Q1?", "Follow-up Q2?"], "notes": "Why I need more info"}
+2. If you NEED MORE CLARIFICATION, respond with JSON:
+{
+  "need_more": true,
+  "questions": [
+    {
+      "question": "Follow-up question?",
+      "type": "free_text"
+    },
+    {
+      "question": "Another question?",
+      "type": "multiple_choice",
+      "options": ["Option A", "Option B"]
+    }
+  ],
+  "notes": "Why I need more info"
+}
 3. If you HAVE ENOUGH INFO, respond with JSON: {"need_more": false, "plan": "Detailed high-level implementation plan here...", "files_to_modify": ["file1.py", "file2.py"], "estimated_complexity": "low|medium|high", "notes": "Any assumptions made"}
+
+Rules for questions:
+- Each question object MUST have "question" and "type" fields.
+- For "multiple_choice", include an "options" array with 2-5 strings.
+- For "free_text", do NOT include an "options" field.
+- Ask as many questions as genuinely needed.
 
 IMPORTANT: Output ONLY the JSON object, no other text.`;
 
   try {
     db.logActivity(ticket.id, 'answer_process');
     db.updateTicketField(ticket.id, 'status', 'running');
-    const output = await runOpenCode(ticket.id, prompt);
+    const output = await runOpenCode(ticket.id, prompt, undefined, 'clarification');
     db.updateTicketField(ticket.id, 'status', 'idle');
 
     let parsed;
@@ -322,7 +400,12 @@ IMPORTANT: Output ONLY the JSON object, no other text.`;
     if (parsed.need_more) {
       const maxRound = Math.max(...updatedTicket.questions.map(q => q.round || 1), 1);
       for (const q of (parsed.questions || [])) {
-        db.addQuestion(ticket.id, q, null, maxRound + 1);
+        if (typeof q === 'string') {
+          db.addQuestion(ticket.id, q, null, maxRound + 1, 'free_text', null);
+        } else {
+          const opts = q.options && Array.isArray(q.options) ? JSON.stringify(q.options) : null;
+          db.addQuestion(ticket.id, q.question, null, maxRound + 1, q.type || 'free_text', opts);
+        }
       }
       if (parsed.notes) db.logActivity(ticket.id, 'followup_notes', parsed.notes);
       return res.json({ clarified: false, ...db.getTicket(ticket.id) });
@@ -437,11 +520,7 @@ Work in: ${worktreePath}`;
       } catch { /* best-effort */ }
     }, 2000);
 
-    const output = await runOpenCode(ticket.id, prompt, (line) => {
-      if (line.startsWith('[resource]')) {
-        db.logActivity(ticket.id, 'resource', line.replace('[resource] ', ''));
-      }
-    });
+    const output = await runOpenCode(ticket.id, prompt, undefined, 'implementation');
 
     // Store token usage delta
     const tokensAfter = getOpencodeTokens();
