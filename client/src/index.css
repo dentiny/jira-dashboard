@@ -1,0 +1,143 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────
+   Design tokens — one source of truth for type, color, space.
+   No `text-[13px]`, no random hex codes, no rogue values.
+   ───────────────────────────────────────────────────────── */
+@theme {
+  /* Surface / border */
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #f8fafc;
+  --color-surface-3: #f1f5f9;
+  --color-border: #e5e7eb;
+  --color-border-strong: #d4d4d8;
+
+  /* Text — three levels only */
+  --color-ink-1: #18181b;     /* primary */
+  --color-ink-2: #52525b;     /* secondary */
+  --color-ink-3: #a1a1aa;     /* tertiary / meta */
+
+  /* Brand */
+  --color-brand: #1f2937;
+  --color-brand-fg: #ffffff;
+
+  /* Stage palette — muted, distinct, professional */
+  --color-stage-clarify: #2563eb;
+  --color-stage-clarify-bg: #eff6ff;
+  --color-stage-clarify-border: #bfdbfe;
+  --color-stage-impl: #d97706;
+  --color-stage-impl-bg: #fffbeb;
+  --color-stage-impl-border: #fde68a;
+  --color-stage-review: #7c3aed;
+  --color-stage-review-bg: #f5f3ff;
+  --color-stage-review-border: #ddd6fe;
+  --color-stage-ready: #059669;
+  --color-stage-ready-bg: #ecfdf5;
+  --color-stage-ready-border: #a7f3d0;
+  --color-stage-done: #64748b;
+  --color-stage-done-bg: #f1f5f9;
+  --color-stage-done-border: #e2e8f0;
+
+  /* Semantic */
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-danger-bg: #fef2f2;
+  --color-danger-border: #fecaca;
+
+  /* Radii */
+  --radius: 0.5rem;
+
+  /* Fonts */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter",
+    system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* ─────────────────────────────────────────────────────────
+   Type scale — defined as utility classes in @layer.
+   This is the *only* place the team can pick a font size.
+   ───────────────────────────────────────────────────────── */
+@layer components {
+  .t-meta     { font-size: 11px; line-height: 1.45; }
+  .t-small    { font-size: 12px; line-height: 1.5; }
+  .t-body     { font-size: 13px; line-height: 1.55; }
+  .t-emph     { font-size: 14px; line-height: 1.5; }
+  .t-h        { font-size: 16px; line-height: 1.4;  font-weight: 600; letter-spacing: -0.01em; }
+  .t-h-page   { font-size: 13px; line-height: 1.4;  font-weight: 600; letter-spacing: -0.005em; }
+
+  .t-mono-11  { font-family: var(--font-mono); font-size: 11px; }
+  .t-mono-12  { font-family: var(--font-mono); font-size: 12px; }
+}
+
+/* Base */
+html, body, #root { height: 100%; }
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-ink-1);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 13px;
+  line-height: 1.55;
+  /* Stop iOS Safari from blowing up our compact type scale. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Prevent rubber-band scroll leaking from the dialog into the page. */
+  overscroll-behavior: none;
+}
+
+/* Touch: every interactive surface at least 40x40 on phones. */
+@media (max-width: 640px) {
+  button, [role="button"], a {
+    touch-action: manipulation;
+  }
+}
+
+/* Truncation helpers */
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.clamp-4 {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Custom scrollbar — subtle, neutral, never double */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.22); background-clip: padding-box; }
+
+/* On phones, hide scrollbars but keep scrolling functional. */
+@media (max-width: 640px) {
+  *::-webkit-scrollbar { width: 0; height: 0; }
+}
+
+/* Subtle focus ring — single source */
+*:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline-offset: 1px;
+}

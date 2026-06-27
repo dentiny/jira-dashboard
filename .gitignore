@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Runtime logs (test/prepush output)
+*.log
+data/*.log
+
+# Backup files
+data/*.backup
+*.bak
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Build artefacts that aren't the deployable UI
+# (public-spa/ IS tracked so a fresh clone works without `npm run build`)
+public-spa/diagram.html
+public/diagram.html
