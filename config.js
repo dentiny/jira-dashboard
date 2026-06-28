@@ -48,7 +48,7 @@ function env(key, fallback) {
 const config = {
   // Server
   port: parseInt(env('PORT')) || cfg.port || 3006,
-  dataDir: path.resolve(ROOT, cfg.data_dir || 'data'),
+  dataDir: path.resolve(env('JIRA_DATA_DIR') || path.join(ROOT, cfg.data_dir || 'data')),
 
   // Project
   projectName: env('JIRA_PROJECT_NAME') || cfg.project?.name || 'project',
