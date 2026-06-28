@@ -12,6 +12,104 @@ const OPENCODE_BIN = '/home/cutuy/.opencode/bin/opencode';
 const WORKTREES_DIR = '/home/cutuy/.openclaw/workspace/pyxen/.worktrees';
 const DATA_DIR = path.join(__dirname, 'data');
 
+// ── Ticket-context file plumbing ───────────────────────────
+//
+// Heavy per-ticket state (Q&A, plan, review feedback, last test failure
+// tail, vision doc, etc.) is written to a markdown file in the pyxen
+// repo's .opencode/ tree before each opencode call. The CLI argv then
+// only carries a short directive pointing at the file. Two benefits:
+//
+//   1. CLI argv stays small and stable → fewer tokens re-tokenized on
+//      every internal opencode tool call.
+//   2. Opencode reads the file once and it stays in the model's KV cache
+//      for the rest of the session — follow-up tool calls don't refetch.
+//
+// Context lives under pyxen/.opencode/tickets/<ticketId>/ (NOT inside
+// the worktree) because the worktree doesn't exist during clarification
+// and we want the context to survive worktree cleanup on success.
+function ticketContextDir(ticketId) {
+  const safe = String(ticketId).replace(/[^a-zA-Z0-9._-]/g, '_');
+  return path.join(PYXEN_DIR, '.opencode', 'tickets', safe);
+}
+
+function writeTicketContext(ticketId, sections) {
+  const dir = ticketContextDir(ticketId);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'context.md');
+  const header = `# Ticket context: ${ticketId}\n\n_Generated ${new Date().toISOString()} by jira-dashboard._\n\n`;
+  const body = sections
+    .filter(s => s && s.body && String(s.body).trim().length > 0)
+    .map(s => `## ${s.title}\n\n${s.body}\n`)
+    .join('\n');
+  fs.writeFileSync(file, header + body);
+  return file;
+}
+
+// Common prompt prefixes — role + output schema per stage. Stage-specific
+// dynamic content (Q&A, plan, test tail, etc.) goes into the ticket
+// context file (see writeTicketContext); the call site appends the file
+// path so opencode can read it. Keep these prefixes terse and explicit —
+// they're the only thing in the CLI argv.
+const PROMPT_PREFIXES = {
+  clarify: `You are in the CLARIFICATION stage of a ticketing system for the pyxen project at ${PYXEN_DIR}. Ask 3-5 clarifying questions so the user can fill in missing details before implementation. After the user answers, a follow-up call will decide whether to proceed or ask more.
+
+Output ONLY valid JSON — no markdown, no explanation, no code fences:
+
+{
+  "questions": [
+    { "question": "Which database should we use?", "type": "multiple_choice", "options": ["SQLite", "Postgres", "BigQuery"] },
+    { "question": "Any additional constraints?", "type": "free_text" }
+  ],
+  "notes": "Optional: why these questions matter"
+}`,
+
+  evaluate: `You are in the ANSWER EVALUATION stage. The user has answered the clarification questions in the context file. Decide whether to proceed to implementation or ask follow-up questions.
+
+Output ONLY valid JSON — no markdown, no explanation, no code fences:
+
+If you NEED more info:
+{
+  "need_more": true,
+  "questions": [
+    { "question": "Follow-up?", "type": "free_text" },
+    { "question": "Which approach?", "type": "multiple_choice", "options": ["A", "B"] }
+  ],
+  "notes": "Why more info is needed"
+}
+
+If you have ENOUGH info:
+{
+  "need_more": false,
+  "plan": "High-level plan (1-3 sentences)",
+  "files_to_modify": ["file1.py", "file2.py"],
+  "estimated_complexity": "low|medium|high",
+  "notes": "Any assumptions"
+}`,
+
+  implement: `You are implementing changes for a pyxen ticket. Work in the directory referenced below.
+
+Your job:
+1. Read the context file for ticket details (title, content, plan, Q&A, any prior review feedback and test failure tail)
+2. Read the relevant source files to understand the current code
+3. Implement the changes described in the plan
+4. Write clean, well-tested, maintainable code
+5. Make sure existing tests still pass
+6. Update relevant documentation
+7. Commit logical groups of changes with clear messages as you go — ALWAYS commit your work
+
+Do NOT echo or repeat the ticket context back to the user — read it from the file and proceed.`,
+
+  suggest: `You are suggesting feature tickets for the pyxen project. Read the vision document at the path in the context file. Suggest tickets that advance the vision — new primitives, new provider backends, extension ideas, integration with existing tools, or improvements that reduce environment coupling. NO bug fixes, NO cleanup tickets, NO refactors.
+
+Output ONLY valid JSON — no markdown, no explanation:
+
+{
+  "tickets": [
+    {"title": "Feature title (<10 words)", "content": "What to build and why it advances the vision (one sentence)"}
+  ]
+}`,
+};
+
 // ── SSE broadcast registry ────────────────────────────────
 const sseClients = new Map(); // ticketId → Set<res>
 
@@ -249,6 +347,40 @@ function runOpenCode(ticketId, prompt, onProgress, stage = null, timeout = 180_0
 // ── Git helpers ───────────────────────────────────────────
 function runGit(args, cwd = PYXEN_DIR) {
   return execSync(`git ${args}`, { cwd, encoding: 'utf-8', timeout: 30_000 }).trim();
+}
+
+// Commit gate — ensures every implement run leaves a real commit on the
+// feature branch (not a dirty working tree). This is what makes the diff
+// endpoint (`git log main..HEAD --stat`) and the commit_sha column on
+// tickets meaningful. Without it, opencode can finish implementation,
+// report success, and never `git commit`, leaving the worktree dirty and
+// review showing an empty diff.
+//
+// Behavior:
+//   - If working tree is dirty (staged + unstaged + untracked), `git add -A`
+//     and commit with the provided message.
+//   - If already clean (opencode committed mid-run), just return current HEAD.
+//   - On any failure, log to activity and return null — never throw. The
+//     implement pipeline continues so the user can still see the dirty
+//     worktree in the review diff fallback.
+function commitWorktreeChanges(worktreePath, ticketId, message, { partial = false } = {}) {
+  const tag = partial ? 'commit_partial' : 'commit';
+  try {
+    const status = runGit(`status --porcelain`, worktreePath);
+    let sha;
+    if (status) {
+      runGit(`add -A`, worktreePath);
+      runGit(`commit -m "${message.replace(/"/g, '')}"`, worktreePath);
+      sha = runGit(`rev-parse HEAD`, worktreePath);
+    } else {
+      sha = runGit(`rev-parse HEAD`, worktreePath);
+    }
+    db.logActivity(ticketId, tag, `${sha.slice(0, 7)}: ${message.replace(/"/g, '')}`);
+    return sha;
+  } catch (err) {
+    db.logActivity(ticketId, 'commit_failed', err.message.slice(0, 200));
+    return null;
+  }
 }
 
 function ensureWorktreesDir() {
@@ -587,29 +719,18 @@ app.post('/api/tickets/:id/clarify', async (req, res) => {
     extraContext = `\n\nReview feedback from previous implementation:\n${ticket.review_feedback}`;
   }
 
-  const prompt = `You are in the CLARIFICATION stage of a ticketing system.
+  // Heavy ticket state goes to file; the CLI argv only carries the
+  // directive + path. See PROMPT_PREFIXES and writeTicketContext above.
+  const contextFile = writeTicketContext(ticket.id, [
+    { title: 'Ticket title', body: ticket.title },
+    { title: 'Ticket description', body: ticket.content },
+    ticket.review_feedback && {
+      title: 'Review feedback from previous implementation',
+      body: ticket.review_feedback,
+    },
+  ].filter(Boolean));
 
-A user filed a ticket for the pyxen project at ${PYXEN_DIR}. Your job is to ask
-clarifying questions so the user can provide the missing details. After the user
-answers, a follow-up call will decide whether to proceed to implementation or
-ask more questions.
-
-Ticket title: ${ticket.title}
-Ticket description: ${ticket.content}${extraContext}
-
-Ask 3-5 questions. For each question pick a format:
-  - "free_text"  — user types a free-form answer
-  - "multiple_choice" — user picks from a list (provide 2-5 options)
-
-Output ONLY valid JSON — no markdown, no explanation, no code fences:
-
-{
-  "questions": [
-    { "question": "Which database should we use?", "type": "multiple_choice", "options": ["SQLite", "Postgres", "BigQuery"] },
-    { "question": "Any additional constraints?", "type": "free_text" }
-  ],
-  "notes": "Optional: why these questions matter"
-}`;
+  const prompt = `${PROMPT_PREFIXES.clarify}\n\nRead full ticket context at: ${contextFile}`;
 
   try {
     db.clearStageActivity(ticket.id, 'clarification');
@@ -684,41 +805,19 @@ app.post('/api/tickets/:id/answer', async (req, res) => {
     `Q${i + 1}: ${q.question}\nA${i + 1}: ${q.answer || '(no answer yet)'}`
   ).join('\n\n');
 
-  let extraContext = '';
-  if (updatedTicket.review_feedback) {
-    extraContext = `\n\nPrevious review feedback: ${updatedTicket.review_feedback}`;
-  }
+  // Heavy ticket state goes to file; the CLI argv only carries the
+  // directive + path. See PROMPT_PREFIXES and writeTicketContext above.
+  const contextFile = writeTicketContext(updatedTicket.id, [
+    { title: 'Ticket title', body: updatedTicket.title },
+    { title: 'Ticket description', body: updatedTicket.content },
+    { title: 'Clarification Q&A', body: qaText },
+    updatedTicket.review_feedback && {
+      title: 'Previous review feedback',
+      body: updatedTicket.review_feedback,
+    },
+  ].filter(Boolean));
 
-  const prompt = `You are in the ANSWER EVALUATION stage. The user has answered the
-clarification questions below. Your job: decide whether to proceed to
-implementation or ask follow-up questions.
-
-Ticket: ${updatedTicket.title}
-Content: ${updatedTicket.content}${extraContext}
-
-Q&A:
-${qaText}
-
-Output ONLY valid JSON — no markdown, no explanation, no code fences:
-
-If you NEED more info:
-{
-  "need_more": true,
-  "questions": [
-    { "question": "Follow-up?", "type": "free_text" },
-    { "question": "Which approach?", "type": "multiple_choice", "options": ["A", "B"] }
-  ],
-  "notes": "Why more info is needed"
-}
-
-If you have ENOUGH info:
-{
-  "need_more": false,
-  "plan": "High-level plan (1-3 sentences)",
-  "files_to_modify": ["file1.py", "file2.py"],
-  "estimated_complexity": "low|medium|high",
-  "notes": "Any assumptions"
-}`;
+  const prompt = `${PROMPT_PREFIXES.evaluate}\n\nRead full ticket context at: ${contextFile}`;
 
   try {
     db.clearStageActivity(ticket.id, 'clarification');
@@ -828,33 +927,25 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
     // report as ticket context so opencode can either fix what's broken
     // or ask clarifying questions about the failures.
     const testContext = wasReview ? buildTestContextForPrompt(ticket.id) : '';
-    const reviewContext = ticket.review_feedback
-      ? `\n\nReview feedback from previous implementation:\n${ticket.review_feedback}`
-      : '';
-    const testContextBlock = testContext
-      ? `\n\n${testContext}`
-      : '';
 
-    const prompt = `You are implementing changes for a ticket in the pyxen project. Work in the directory: ${worktreePath}
+    // Heavy ticket state goes to file; the CLI argv only carries the
+    // directive + paths. See PROMPT_PREFIXES and writeTicketContext above.
+    // The worktree path is repeated in the context file's header so an
+    // opencode agent that lands on a stale prompt can still find it.
+    const contextFile = writeTicketContext(ticket.id, [
+      { title: 'Worktree', body: `Work in this directory:\n\n\`\`\`\n${worktreePath}\n\`\`\`` },
+      { title: 'Ticket title', body: ticket.title },
+      { title: 'Ticket description', body: ticket.content },
+      { title: 'Clarification Q&A', body: qaText },
+      { title: 'Implementation plan', body: ticket.plan || '(no plan yet)' },
+      ticket.review_feedback && {
+        title: 'Review feedback from previous implementation',
+        body: ticket.review_feedback,
+      },
+      testContext && { title: 'Most recent test run', body: testContext },
+    ].filter(Boolean));
 
-Ticket: ${ticket.title}
-Content: ${ticket.content}
-
-Clarification Q&A:
-${qaText}
-
-Implementation Plan:
-${ticket.plan}${reviewContext}${testContextBlock}
-
-Your job:
-1. Read the relevant source files to understand the current code
-2. Implement the changes described in the plan
-3. Write clean, well-tested, maintainable code
-4. Make sure all existing tests still pass
-5. Update any relevant documentation
-6. Commit logical groups of changes with clear messages as you go — ALWAYS commit your work
-
-Work in: ${worktreePath}`;
+    const prompt = `${PROMPT_PREFIXES.implement}\n\nRead full ticket context at: ${contextFile}\nWork in: ${worktreePath}`;
 
     db.clearStageActivity(ticket.id, 'implementation');
     db.logActivity(ticket.id, 'implement_start');
@@ -912,8 +1003,26 @@ Work in: ${worktreePath}`;
 
     clearInterval(fileMonitor);
 
+    // Commit gate: ensure every implement run leaves a real commit on the
+    // feature branch. Without this, opencode can finish, pass tests, and
+    // transition to review while the worktree is still dirty — leaving the
+    // diff endpoint (git log main..HEAD --stat) empty and commit_sha null.
+    const commitSha = commitWorktreeChanges(
+      worktreePath,
+      ticket.id,
+      `${ticket.id}: implement`,
+    );
+
+    // Capture diff from committed history (matches /api/tickets/:id/diff on
+    // line 1142). Falls back to a dirty-tree diff only if the commit gate
+    // itself failed, so reviewers still see what the agent produced.
     let diffSummary = '';
-    try { diffSummary = runGit(`diff --stat`, worktreePath); } catch { diffSummary = '(no diff)'; }
+    try {
+      diffSummary = runGit(`log main..HEAD --stat`, worktreePath);
+    } catch { /* fall through */ }
+    if (!diffSummary) {
+      try { diffSummary = runGit(`diff --stat HEAD`, worktreePath); } catch { diffSummary = '(no diff)'; }
+    }
 
     // Save cumulative CPU/elapsed from last resource entry
     const t2 = db.getTicket(ticket.id);
@@ -924,11 +1033,16 @@ Work in: ${worktreePath}`;
       db.updateTicket(ticket.id, {
         total_cpu: p.cpu || '0',
         total_elapsed: p.elapsed || '0',
+        commit_sha: commitSha || null,
         stage: 'review',
         status: 'idle'
       });
     } else {
-      db.updateTicket(ticket.id, { stage: 'review', status: 'idle' });
+      db.updateTicket(ticket.id, {
+        commit_sha: commitSha || null,
+        stage: 'review',
+        status: 'idle'
+      });
     }
     db.logActivity(ticket.id, 'implement_done', diffSummary.slice(0, 500));
 
@@ -955,10 +1069,18 @@ Work in: ${worktreePath}`;
           total_elapsed: p.elapsed || '0'
         });
       }
-      try { runGit(`add -A`, worktreePath); } catch {}
-      try { runGit(`commit -m "${ticket.id}: partial (error: ${err.message.slice(0, 80).replace(/"/g, '')})"`, worktreePath); } catch {}
+      const partialSha = commitWorktreeChanges(
+        worktreePath,
+        ticket.id,
+        `${ticket.id}: partial (error: ${err.message.slice(0, 80).replace(/"/g, '')})`,
+        { partial: true },
+      );
       db.logActivity(ticket.id, 'implement_error', err.message);
-      db.updateTicket(ticket.id, { stage: 'review', status: 'idle' });
+      db.updateTicket(ticket.id, {
+        commit_sha: partialSha || null,
+        stage: 'review',
+        status: 'idle',
+      });
       // Still run tests on the partial work — the user needs to know
       // whether the partial state passes / fails before continuing.
       const testRunId = runTicketTests(ticket.id, 'auto');
@@ -1254,21 +1376,19 @@ async function generateSuggestions() {
     const visionPath = path.join(PYXEN_DIR, 'docs', 'vision.md');
     const vision = fs.existsSync(visionPath) ? fs.readFileSync(visionPath, 'utf-8') : '';
 
-    const prompt = `You are suggesting feature tickets for the pyxen project.
+    // Vision doc goes to file; the CLI argv only carries the directive
+    // + path. Suggestions are pseudo-tickets (id '_suggestions') so we
+    // write to a stable slot rather than a per-ticket dir.
+    const sugDir = path.join(PYXEN_DIR, '.opencode', 'tickets', '_suggestions');
+    fs.mkdirSync(sugDir, { recursive: true });
+    const contextFile = path.join(sugDir, 'context.md');
+    fs.writeFileSync(contextFile,
+      `# Suggestion generation context\n\n_Generated ${new Date().toISOString()}._\n\n` +
+      `## Project root\n\n\`\`\`\n${PYXEN_DIR}\n\`\`\`\n\n` +
+      `## Project vision (${visionPath})\n\n${vision}\n`
+    );
 
-Project: ${PYXEN_DIR}
-
-Project vision (${visionPath}):
-${vision}
-
-Suggest ${SUGGESTIONS_MAX} tickets. Each must advance the vision above — new primitives, new provider backends, extension ideas, integration with existing tools, or improvements that reduce environment coupling. NO bug fixes, NO cleanup tickets, NO refactors.
-
-Output ONLY valid JSON — no markdown, no explanation:
-{
-  "tickets": [
-    {"title": "Feature title (<10 words)", "content": "What to build and why it advances the vision (one sentence)"}
-  ]
-}`;
+    const prompt = `${PROMPT_PREFIXES.suggest}\n\nSuggest ${SUGGESTIONS_MAX} tickets.\n\nRead vision + project root at: ${contextFile}`;
     const output = await runOpenCode('_suggestions', prompt, undefined, null, 120_000);
     const jsonMatch = output.match(/\{[\s\S]*\}/);
     const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
