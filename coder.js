@@ -8,6 +8,10 @@ const fs = require('fs');
 const os = require('os');
 const config = require('./config');
 
+// Shared usage store — backends without a native stats command
+// write into this after each run; getStats returns it.
+let _lastUsage = { cost: 0, input: '0', output: '0' };
+
 // ── opencode backend ───────────────────────────────────────
 const opencodeBackend = {
   name: 'opencode',
@@ -54,11 +58,13 @@ const claudeBackend = {
   name: 'claude',
 
   stats() {
-    return { cost: 0, input: '0', output: '0' };
+    return _lastUsage;
   },
 
   buildArgs(prompt, sessionId, title) {
-    const args = sessionId ? ['-r', sessionId, '-p', prompt] : ['-p', prompt];
+    const args = sessionId
+      ? ['-r', sessionId, '-p', prompt, '--output-format', 'json']
+      : ['-p', prompt, '--output-format', 'json'];
     return args;
   },
 
@@ -69,6 +75,21 @@ const claudeBackend = {
       VIRTUAL_ENV: path.join(config.projectDir, config.venv.dir),
     };
   },
+
+  parseOutput(stdout) {
+    try {
+      const data = JSON.parse(stdout);
+      if (data.result !== undefined) {
+        _lastUsage = {
+          cost: data.total_cost_usd || 0,
+          input: String(data.usage?.input_tokens || 0),
+          output: String(data.usage?.output_tokens || 0),
+        };
+        return String(data.result);
+      }
+    } catch {}
+    return stdout;
+  },
 };
 
 // ── codex backend ──────────────────────────────────────────
@@ -76,13 +97,14 @@ const codexBackend = {
   name: 'codex',
 
   stats() {
-    return { cost: 0, input: '0', output: '0' };
+    return _lastUsage;
   },
 
   buildArgs(prompt, sessionId, title) {
-    return sessionId
-      ? ['exec', 'resume', sessionId, prompt]
-      : ['exec', prompt];
+    const args = sessionId
+      ? ['exec', 'resume', sessionId, prompt, '--json']
+      : ['exec', prompt, '--json'];
+    return args;
   },
 
   buildEnv() {
@@ -91,6 +113,30 @@ const codexBackend = {
       PATH: `${config.venvBin()}:${process.env.PATH}`,
       VIRTUAL_ENV: path.join(config.projectDir, config.venv.dir),
     };
+  },
+
+  parseOutput(stdout) {
+    try {
+      const lines = stdout.trim().split('\n');
+      let text = '';
+      for (const line of lines) {
+        try {
+          const evt = JSON.parse(line);
+          if (evt.type === 'turn.completed' && evt.usage) {
+            _lastUsage = {
+              cost: 0,
+              input: String(evt.usage.input_tokens || 0),
+              output: String(evt.usage.output_tokens || 0),
+            };
+          }
+          if (evt.type === 'item.completed' && evt.item?.type === 'agent_message') {
+            text += evt.item.text || '';
+          }
+        } catch {}
+      }
+      if (text) return text;
+    } catch {}
+    return stdout;
   },
 };
 
@@ -124,7 +170,9 @@ function resolveBackend() {
 // ── Public API ─────────────────────────────────────────────
 
 function getStats() {
-  return resolveBackend().stats();
+  const backend = resolveBackend();
+  if (backend.name === 'opencode') return backend.stats();
+  return _lastUsage;
 }
 
 /** Spawn the coder CLI, stream stdout, resolve with full output.
@@ -172,14 +220,17 @@ function run(prompt, opts = {}) {
 
     proc.on('close', code => {
       clearInterval(resMonitor.interval);
+      const raw = stdout.trim();
+      // Let the backend parse usage data and extract clean response text
+      const output = backend.parseOutput ? backend.parseOutput(raw) : raw;
       if (code === 0) {
-        if (!stdout.trim() && stderr.trim()) {
+        if (!output && stderr.trim()) {
           reject(new Error(`Coder produced no output: ${stderr.slice(-500)}`));
         } else {
-          resolve(stdout.trim());
+          resolve(output);
         }
-      } else if (stdout.trim()) {
-        resolve(stdout.trim());
+      } else if (output) {
+        resolve(output);
       } else {
         const reason = code === null ? 'killed (signal/timeout)' : `exited ${code}`;
         reject(new Error(`Coder ${reason}: ${stderr.slice(-500)}`));
