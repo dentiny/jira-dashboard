@@ -1,9 +1,11 @@
 # Jira Dashboard — Vision
 
-A Jira kanban board for agentic engineers.
+A kanban board for wishlist-driven development with AI agents.
 
-Single-page dashboard where you define tickets, an AI coder clarifies and implements
-them, and you review the diff, run tests, and close — all locally, no cloud deps.
+Start with ambiguity — a rough idea, a user complaint, a TODO scribbled in a doc.
+The agent asks clarifying questions, proposes a plan, implements in an isolated
+worktree, and runs tests. You review, give feedback, and close. Human and agent
+in the loop, no context switches, no ticket groomers.
 
 ## Goals
 
