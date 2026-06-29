@@ -144,7 +144,7 @@ const config = {
   },
   ticketContextDir(ticketId) {
     const safe = String(ticketId).replace(/[^a-zA-Z0-9._-]/g, '_');
-    return path.join(this.projectDir, '.opencode', 'tickets', safe);
+    return path.join(this.projectDir, '.jira-dashboard', 'tickets', safe);
   },
 };
 
