@@ -51,7 +51,7 @@ Your job:
 4. Write clean, well-tested, maintainable code
 5. Make sure existing tests still pass
 6. Update relevant documentation
-7. Commit logical groups of changes with clear messages as you go — ALWAYS commit your work
+7. Commit ALL changes with clear messages as you go — you MUST commit before declaring implementation complete. Do NOT declare the task done until git add + git commit has been run.
 
 Do NOT echo or repeat the ticket context back to the user — read it from the file and proceed.`,
 

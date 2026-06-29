@@ -931,8 +931,11 @@ app.get('/api/tickets/:id/diff', (req, res) => {
     return res.json({ diff: '(no worktree available)', files: [], explorer_prefix: null });
   }
   try {
-    const diff = runGit(`log ${config.branchDefault}..HEAD --oneline --stat`, ticket.worktree_path);
+    let diff = runGit(`log ${config.branchDefault}..HEAD --oneline --stat`, ticket.worktree_path);
     let files = [];
+    if (!diff) {
+      diff = runGit(`diff ${config.branchDefault}..HEAD --stat`, ticket.worktree_path);
+    }
     try {
       const nameOnly = runGit(`diff --name-only --diff-filter=ACMRT ${config.branchDefault}..HEAD`, ticket.worktree_path);
       files = nameOnly.split('\n').map(s => s.trim()).filter(Boolean);
