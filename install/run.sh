@@ -5,7 +5,7 @@
 # Rules:
 #  - Fail loud, don't be smart.
 #  - Idempotent — safe to run multiple times.
-#  - Never touches your user project data.
+#  - Never touches user project data.
 #
 # Usage: ./bootstrap.sh
 
