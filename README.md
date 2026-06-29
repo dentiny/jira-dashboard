@@ -15,36 +15,47 @@ cd jira-dashboard
 The script is **interactive**. It will:
 
 1. Check prerequisites (Node.js ≥ 18, npm, git)
-2. Create `.env` from template — **never overwrites** an existing one
-3. Prompt for your project directory and coder CLI if not yet set
-4. Validate the project directory exists and is a git repo
-5. Install dependencies and build the client UI
-6. Ask: **background** (systemd user service, starts on boot) or **foreground** (this terminal)
+2. Ask for the absolute path to your git repo
+3. Write `.env` to **`<your-project>/.jira-dashboard/.env`** — one config per project,
+   never touches files in the dashboard checkout itself
+4. Install dependencies and build the client UI
+5. Ask: **background** (systemd user service, starts on boot) or **foreground** (this terminal)
    → default is background, open http://localhost:3006
 
-Run it again anytime — it's idempotent and never touches your project data.
+Run it again anytime for another project — each gets its own `.env` in its own `.jira-dashboard/`.
+The script is idempotent and never overwrites existing configs.
 
-### Manual setup (if you prefer)
+### Manual setup
 
 ```bash
-cp install/templates/env.template .env  # create config
-# edit .env — set JIRA_PROJECT_DIR and JIRA_CODER_BIN
-npm install                              # server dependencies
-(cd client && npm install && npm run build)  # client UI
-node server.js                           # start
+mkdir -p my-project/.jira-dashboard
+cp install/templates/env.template my-project/.jira-dashboard/.env
+# edit .env — set JIRA_CODER_BIN
+npm install
+(cd client && npm install && npm run build)
+cd my-project && node ../server.js   # auto-discovers .jira-dashboard/.env from cwd
 ```
 
-## Configuration
+## How config loading works
 
-Two files control the dashboard. Neither contains hardcoded paths:
+The dashboard discovers your project automatically — no config file needed in the
+dashboard directory itself.
 
-| File | Purpose |
-|---|---|
-| `.env` | **Your machine-specific overrides** — project path, coder binary, ports. Not tracked in git. See `install/templates/env.template` for all available vars. |
-| `config.json` | **Structural defaults** — timeouts, backend config. Tracked in git. See `config.schema.json` for full documentation. |
+1. **Start from `process.cwd()`** and walk up until it finds `<dir>/.jira-dashboard/.env`
+2. Load that `.env` as key=value overrides
+3. Load `config.json` (in the dashboard repo) as structural defaults
+4. `.env` values win over `config.json` values
 
-`.env` values override `config.json` values. Every field has a sensible default —
-you can start with just `JIRA_PROJECT_DIR` and `JIRA_CODER_BIN`.
+This means you can run the server from anywhere inside your project tree —
+the dashboard finds the nearest `.jira-dashboard/.env` by walking up.
+
+### Configuration sources
+
+| Where | What | Tracked? |
+|---|---|---|
+| `<project>/.jira-dashboard/.env` | Machine-specific overrides (paths, ports, API keys) | No — edit per machine |
+| `<dashboard>/config.json` | Structural defaults (timeouts, backend) | Yes — ships with repo |
+| `<dashboard>/config.schema.json` | Full field documentation with defaults | Yes — IDE intellisense |
 
 ## Workflow
 
