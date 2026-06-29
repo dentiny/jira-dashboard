@@ -49,6 +49,31 @@ const opencodeBackend = {
   },
 };
 
+// ── claude code backend ────────────────────────────────────
+const claudeBackend = {
+  name: 'claude',
+
+  stats() {
+    return { cost: 0, input: '0', output: '0' };
+  },
+
+  buildArgs(prompt, sessionId, title) {
+    const args = ['-p', prompt];
+    if (sessionId) {
+      args.push('--resume', sessionId);
+    }
+    return args;
+  },
+
+  buildEnv() {
+    return {
+      HOME: process.env.HOME,
+      PATH: `${config.venvBin()}:${process.env.PATH}`,
+      VIRTUAL_ENV: path.join(config.projectDir, config.venv.dir),
+    };
+  },
+};
+
 // ── dummy backend (for testing) ────────────────────────────
 const dummyBackend = {
   name: 'dummy',
@@ -64,7 +89,7 @@ const dummyBackend = {
 };
 
 // ── Registry ───────────────────────────────────────────────
-const backends = { opencode: opencodeBackend, dummy: dummyBackend };
+const backends = { opencode: opencodeBackend, claude: claudeBackend, dummy: dummyBackend };
 
 function resolveBackend() {
   const type = config.coder.type;
