@@ -5,7 +5,7 @@ const ACTIVITY_MAX_VISIBLE = 24
 const FILES_MODIFIED_MAX_VISIBLE = 12
 import {
   Loader2, Link as LinkIcon, ExternalLink, Play, Shield,
-  RefreshCw, ArrowRight, X, ChevronRight, Circle, Copy, Check
+  RefreshCw, ArrowRight, X, ChevronRight, Circle, Copy, Check, Sun, Moon, Monitor
 } from 'lucide-react'
 
 /* ─────────────────────────────────────────────────────────
@@ -673,6 +673,9 @@ export default function App() {
   const [out, setOut] = useState({ open: false, title: '', text: '', status: '' })
   const [suggestions, setSuggestions] = useState<Sug[]>([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(true)
+  const [theme, setTheme] = useState<'auto' | 'dark' | 'light'>(
+    (typeof localStorage !== 'undefined' && localStorage.getItem('theme') as any) || 'auto'
+  )
   const [cfg, setCfg] = useState<ClientConfig>({ projectName: 'Board', remoteHost: 'example-claw', explorer: { url: '', owner: '', repo: '' }, testEnabled: false })
   const [diff, setDiff] = useState('')
   const [diffFiles, setDiffFiles] = useState<{ path: string; explorer_prefix: string | null }[]>([])
@@ -700,11 +703,20 @@ export default function App() {
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const update = () => document.documentElement.classList.toggle('dark', mq.matches)
+    const update = () => {
+      const isDark = theme === 'dark' || (theme === 'auto' && mq.matches)
+      document.documentElement.classList.toggle('dark', isDark)
+    }
     update()
     mq.addEventListener('change', update)
     return () => mq.removeEventListener('change', update)
-  }, [])
+  }, [theme])
+
+  function cycleTheme() {
+    const next = theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto'
+    setTheme(next)
+    localStorage.setItem('theme', next)
+  }
 
   useEffect(() => { fetchJSON<ClientConfig>('/api/config').then(setCfg).catch(() => {}); load(); loadSuggestions(); ensureNotifyPerm(); const i = setInterval(load, 10000); return () => clearInterval(i) }, [load])
 
@@ -1051,6 +1063,9 @@ export default function App() {
               <Shield className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Pre-push</span>
             </Btn>
+            <button onClick={cycleTheme} className="h-7 w-7 inline-flex items-center justify-center rounded-md text-ink-2 hover:text-ink-1 hover:bg-surface-3 transition-colors" aria-label={`Theme: ${theme}`}>
+              {theme === 'dark' ? <Moon className="h-3.5 w-3.5" /> : theme === 'light' ? <Sun className="h-3.5 w-3.5" /> : <Monitor className="h-3.5 w-3.5" />}
+            </button>
           </div>
         </div>
       </header>
