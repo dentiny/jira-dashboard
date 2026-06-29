@@ -129,34 +129,38 @@ MODE="${MODE:-1}"
 
 case "$MODE" in
   1)  # Background — systemd
-    # Pick a port. If the configured port is already listening
-    # (any service, not just dashboard), auto-increment.
+    # Derive port from .env or config default
     BASE_PORT=$(grep "^PORT=" "$ENV_FILE" 2>/dev/null | sed 's/^[^=]*=//')
     if [ -z "$BASE_PORT" ]; then
       BASE_PORT=$(node -e "console.log(require('./config.json').port || 3006)" 2>/dev/null || echo "3006")
     fi
-    PORT="$BASE_PORT"
-    while ss -tlnp 2>/dev/null | grep -q ":${PORT}\b"; do
-      PORT=$((PORT + 1))
-    done
-    if [ "$PORT" != "$BASE_PORT" ]; then
-      info "Port ${BASE_PORT} is already in use — using port ${PORT} instead"
-      if grep -q "^PORT=" "$ENV_FILE" 2>/dev/null; then
-        sed -i "s|^PORT=.*|PORT=${PORT}|" "$ENV_FILE"
-      else
-        echo "PORT=${PORT}" >> "$ENV_FILE"
-      fi
-    fi
 
-    UNIT_NAME="jira-dashboard-${PORT}"
+    UNIT_NAME="jira-dashboard-${BASE_PORT}"
     UNIT_PATH="$HOME/.config/systemd/user/${UNIT_NAME}.service"
     SVC_TEMPLATE="$INSTALL_DIR/templates/template.service"
 
     if [ -f "$UNIT_PATH" ]; then
       ok "Systemd service ${UNIT_NAME} already exists — keeping it"
+      PORT="$BASE_PORT"
     else
-      info "Creating systemd service..."
+      # Pick a free port if the configured one is already taken
+      PORT="$BASE_PORT"
+      while ss -tlnp 2>/dev/null | grep -q ":${PORT}\b"; do
+        PORT=$((PORT + 1))
+      done
+      if [ "$PORT" != "$BASE_PORT" ]; then
+        info "Port ${BASE_PORT} is already in use — using port ${PORT} instead"
+        if grep -q "^PORT=" "$ENV_FILE" 2>/dev/null; then
+          sed -i "s|^PORT=.*|PORT=${PORT}|" "$ENV_FILE"
+        else
+          echo "PORT=${PORT}" >> "$ENV_FILE"
+        fi
+      fi
 
+      UNIT_NAME="jira-dashboard-${PORT}"
+      UNIT_PATH="$HOME/.config/systemd/user/${UNIT_NAME}.service"
+
+      info "Creating systemd service..."
       mkdir -p "$HOME/.config/systemd/user"
       NODE=$(command -v node) \
       ROOT="$ROOT" \
