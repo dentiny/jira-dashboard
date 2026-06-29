@@ -43,6 +43,7 @@ ok "Node.js $(node -v)  npm $(npm -v)  git $(git --version | awk '{print $3}')"
 step "Configuration"
 
 PROJECT_DIR=$(prompt "Absolute path to your git repo")
+PROJECT_DIR="${PROJECT_DIR/#\~/$HOME}"
 [ "${PROJECT_DIR:0:1}" = "/" ] || fail "Must be an absolute path: ${PROJECT_DIR}"
 [ -d "$PROJECT_DIR" ] || fail "Directory does not exist: ${PROJECT_DIR}"
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
