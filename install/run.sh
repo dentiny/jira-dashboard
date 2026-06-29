@@ -24,7 +24,7 @@ step()  { echo; echo -e "${CYAN}${BOLD}── ${1} ──${NC}"; }
 info()  { echo -e "  ${CYAN}•${NC} $1"; }
 ok()    { echo -e "  ${GREEN}✓${NC} $1"; }
 fail()  { echo -e "  ${RED}✗${NC} ${BOLD}$1${NC}"; exit 1; }
-prompt(){ echo -ne "  ${BOLD}?${NC} $1 " >&2; read -r REPLY; echo "$REPLY"; }
+prompt(){ echo -e "  ${BOLD}?${NC} $1" >&2; read -r REPLY; echo "$REPLY"; }
 
 # ── Step 0: Prerequisites ──────────────────────────────────
 step "Prerequisites"
