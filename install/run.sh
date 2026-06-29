@@ -48,6 +48,26 @@ PROJECT_DIR="$(cd "$PROJECT_DIR" 2>/dev/null && pwd)" || true
 [ -d "$PROJECT_DIR" ] || fail "Directory does not exist: ${PROJECT_DIR}"
 [ -d "$PROJECT_DIR/.git" ] || warn "${PROJECT_DIR} is not a git repository — worktree features will fail"
 
+# Auto-detect git remote
+GIT_REMOTE=""
+GIT_HOST=""
+GIT_OWNER=""
+GIT_REPO=""
+if [ -d "$PROJECT_DIR/.git" ]; then
+  GIT_REMOTE=$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || true)
+  if [ -n "$GIT_REMOTE" ]; then
+    # Normalize: strip protocol/auth suffix
+    remote_clean=$(echo "$GIT_REMOTE" | sed 's,^git@,https://,' | sed 's,\.git$,,; s,/$,,' | sed 's,:,/,')
+    GIT_HOST=$(echo "$remote_clean" | sed 's,https://,,; s,/.*,,')
+    path_part=$(echo "$remote_clean" | sed "s,https://${GIT_HOST}/,,")
+    GIT_OWNER=$(echo "$path_part" | cut -d/ -f1)
+    GIT_REPO=$(echo "$path_part" | cut -d/ -f2-)
+    [ "$GIT_HOST" = "github.com" ] && EXPLORER_URL="https://github.com/{owner}/{repo}/blob/{sha}/{path}" \
+      || EXPLORER_URL="https://${GIT_HOST}/{owner}/{repo}/blob/{sha}/{path}"
+    ok "Detected git remote: ${GIT_HOST}/${GIT_OWNER}/${GIT_REPO}"
+  fi
+fi
+
 # Prompt for project display name
 default_name="$(basename "$PROJECT_DIR")"
 PROJECT_NAME=$(prompt "Project display name [${default_name}]")
@@ -68,10 +88,14 @@ mkdir -p "$ENV_DIR"
 if [ -f "$ENV_FILE" ]; then
   ok ".env already exists at ${ENV_FILE} — keeping your settings"
 else
-  sed \
-    -e "s|^JIRA_PROJECT_NAME=.*|JIRA_PROJECT_NAME=${PROJECT_NAME}|" \
-    -e "s|^JIRA_CODER_BIN=.*|JIRA_CODER_BIN=${CODER_BIN}|" \
-    "$INSTALL_DIR/templates/env.template" > "$ENV_FILE"
+  SED_ARGS="-e s|^JIRA_PROJECT_NAME=.*|JIRA_PROJECT_NAME=${PROJECT_NAME}|"
+  SED_ARGS="${SED_ARGS} -e s|^JIRA_CODER_BIN=.*|JIRA_CODER_BIN=${CODER_BIN}|"
+  if [ -n "$GIT_OWNER" ]; then
+    SED_ARGS="${SED_ARGS} -e s|^# EXPLORER_URL=.*|EXPLORER_URL=${EXPLORER_URL}|"
+    SED_ARGS="${SED_ARGS} -e s|^# GITHUB_OWNER=.*|GITHUB_OWNER=${GIT_OWNER}|"
+    SED_ARGS="${SED_ARGS} -e s|^# GITHUB_REPO=.*|GITHUB_REPO=${GIT_REPO}|"
+  fi
+  sed $SED_ARGS "$INSTALL_DIR/templates/env.template" > "$ENV_FILE"
   ok "Created ${ENV_FILE}"
 fi
 info "Edit ${ENV_FILE} to fine-tune settings, then re-run install"
