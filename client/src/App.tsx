@@ -672,6 +672,7 @@ export default function App() {
   const [feedback, setFeedback] = useState('')
   const [out, setOut] = useState({ open: false, title: '', text: '', status: '' })
   const [suggestions, setSuggestions] = useState<Sug[]>([])
+  const [suggestionsLoading, setSuggestionsLoading] = useState(true)
   const [cfg, setCfg] = useState<ClientConfig>({ projectName: 'Board', remoteHost: 'example-claw', explorer: { url: '', owner: '', repo: '' }, testEnabled: false })
   const [diff, setDiff] = useState('')
   const [diffFiles, setDiffFiles] = useState<{ path: string; explorer_prefix: string | null }[]>([])
@@ -814,7 +815,12 @@ export default function App() {
   }
 
   async function loadSuggestions() {
-    try { setSuggestions(await fetchJSON('/api/suggestions')) } catch {}
+    setSuggestionsLoading(true)
+    const poll = () => fetchJSON<Sug[]>('/api/suggestions').then(d => {
+      if (d.length > 0) { setSuggestions(d); setSuggestionsLoading(false); return }
+      setTimeout(poll, 3000)
+    }).catch(() => setTimeout(poll, 3000))
+    poll()
   }
 
   async function acceptSuggestion(sug: Sug) {
@@ -1064,6 +1070,12 @@ export default function App() {
                 <SuggestionCard key={sug.id} sug={sug} onAccept={acceptSuggestion} onDismiss={dismissSuggestion} />
               ))}
             </div>
+          </div>
+        )}
+        {suggestionsLoading && suggestions.length === 0 && (
+          <div className="mb-5 sm:mb-6 flex items-center gap-2 text-zinc-400 t-small">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading suggestions…
           </div>
         )}
 
