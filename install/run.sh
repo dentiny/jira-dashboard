@@ -62,20 +62,19 @@ fi
 
 # Write .env into project's .jira-dashboard/
 ENV_DIR="${PROJECT_DIR}/.jira-dashboard"
+ENV_FILE="${ENV_DIR}/.env"
 mkdir -p "$ENV_DIR"
 
-if [ -f "$ENV_DIR/.env" ]; then
-  ok ".env already exists at ${ENV_DIR}/.env — keeping your settings"
+if [ -f "$ENV_FILE" ]; then
+  ok ".env already exists at ${ENV_FILE} — keeping your settings"
 else
-  # Start from template and fill in the essentials
   sed \
-    -e "s|/path/to/your/project|${PROJECT_DIR}|" \
     -e "s|^JIRA_PROJECT_NAME=.*|JIRA_PROJECT_NAME=${PROJECT_NAME}|" \
     -e "s|^JIRA_CODER_BIN=.*|JIRA_CODER_BIN=${CODER_BIN}|" \
-    "$INSTALL_DIR/templates/env.template" > "$ENV_DIR/.env"
-  ok "Created ${ENV_DIR}/.env"
-  info "Edit ${ENV_DIR}/.env to fine-tune settings, then re-run install"
+    "$INSTALL_DIR/templates/env.template" > "$ENV_FILE"
+  ok "Created ${ENV_FILE}"
 fi
+info "Edit ${ENV_FILE} to fine-tune settings, then re-run install"
 
 # ── Step 2: Dependencies ────────────────────────────────────
 step "Dependencies"
@@ -106,7 +105,23 @@ MODE="${MODE:-1}"
 
 case "$MODE" in
   1)  # Background — systemd
-    PORT=$(grep "^PORT=" "$ENV_DIR/.env" | sed 's/^[^=]*=//' || echo "3006")
+    # Pick a port. If the configured port is already taken by another
+    # dashboard instance, auto-increment until we find a free one.
+    BASE_PORT=$(grep "^PORT=" "$ENV_FILE" 2>/dev/null | sed 's/^[^=]*=//' || echo "3006")
+    PORT="$BASE_PORT"
+    while systemctl --user list-units --no-pager 2>/dev/null | grep -q "jira-dashboard-${PORT}\.service.*active"; do
+      PORT=$((PORT + 1))
+    done
+    if [ "$PORT" != "$BASE_PORT" ]; then
+      info "Port ${BASE_PORT} is taken — using port ${PORT} instead"
+      # Persist the chosen port so future installs reuse it
+      if grep -q "^PORT=" "$ENV_FILE" 2>/dev/null; then
+        sed -i "s|^PORT=.*|PORT=${PORT}|" "$ENV_FILE"
+      else
+        echo "PORT=${PORT}" >> "$ENV_FILE"
+      fi
+    fi
+
     UNIT_NAME="jira-dashboard-${PORT}"
     UNIT_PATH="$HOME/.config/systemd/user/${UNIT_NAME}.service"
     SVC_TEMPLATE="$INSTALL_DIR/templates/template.service"
@@ -136,7 +151,7 @@ case "$MODE" in
     echo ""
     info "Manage:  systemctl --user ${UNIT_NAME}.service {start|stop|restart|status}"
     info "Logs:    journalctl --user -u ${UNIT_NAME}.service -f"
-    info "Config:  edit ${ENV_DIR}/.env then restart the service"
+    info "Config:  edit ${ENV_FILE} then restart the service"
     info "Data:    ${PROJECT_DIR}/.jira-dashboard/store.db"
     ;;
 
