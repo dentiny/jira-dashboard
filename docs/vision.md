@@ -25,3 +25,6 @@ Migrations are explicit, and old JSON backups can rebuild it from scratch.
 
 **Editor agnostic** — VSCode and Cursor URIs are configurable. The dashboard
 just links to your editor; it doesn't mandate one.
+
+**User owns their data** — the SQLite database lives in your project directory.
+No telemetry, no external services, no data leaves your machine.
