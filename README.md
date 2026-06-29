@@ -2,48 +2,6 @@
 
 Lightweight ticket dashboard for AI-assisted development. No DB servers, no cloud accounts.
 
-## Screenshots
-
-The full ticket lifecycle, board to merge — click any card to open the popup.
-
-### Home
-
-The four-stage board with AI-suggested tickets queued above. Create new tickets inline, run tests, trigger a pre-push check from the header.
-
-![Desktop home](docs/screenshots/desktop-home.png)
-
-### Clarification
-
-The dashboard asks focused questions, accepts multiple-choice or free-form answers (including an "Other" escape hatch), and supports multi-round back-and-forth before code is written.
-
-![Clarification stage](docs/screenshots/desktop-clarification.png)
-
-### Implementation
-
-Once answers are in, the AI drafts a plan and commits it to a per-ticket worktree. The same plan becomes the spec the implementation runs against.
-
-![Implementation stage](docs/screenshots/desktop-implementation.png)
-
-### Review
-
-The worktree, branch, and diff are linked straight to your editor (VSCode / Cursor). Per-stage resource usage breaks down CPU, memory, cost, and tokens for the clarification vs. implementation calls so you can spot runaway runs. One click cherry-picks into `main`.
-
-![Review stage](docs/screenshots/desktop-review.png)
-
-### Done
-
-Merged commit, plan, test report with collapsible output, and the full activity timeline — the ticket's complete history in one view.
-
-![Done stage](docs/screenshots/desktop-done.png)
-
-### Mobile
-
-Single-column layout, full-screen sheet for ticket detail. Touch-friendly button sizes, the same data, no compromises.
-
-| Home | Ticket |
-|:---:|:---:|
-| ![Mobile home](docs/screenshots/mobile-home.png) | ![Mobile ticket](docs/screenshots/mobile-ticket.png) |
-
 ## Quick Start
 
 ```bash
@@ -74,6 +32,26 @@ Opens http://localhost:3006.
 - **API keys** go in `<project>/.env` (not `.jira-dashboard/.env`). Only the project root `.env` is passed to the coder child process.
 - **Linux only** — resource monitor reads `/proc/<pid>/stat`.
 - **Python venv** — `VIRTUAL_ENV` and `.venv/bin/` are prepended automatically.
+
+---
+
+## Screenshots
+
+The full ticket lifecycle, board to merge — click any card to open the popup.
+
+| Stage | Desktop |
+|:---:|:---:|
+| Home | ![Desktop home](docs/screenshots/desktop-home.png) |
+| Clarification | ![Clarification](docs/screenshots/desktop-clarification.png) |
+| Implementation | ![Implementation](docs/screenshots/desktop-implementation.png) |
+| Review | ![Review](docs/screenshots/desktop-review.png) |
+| Done | ![Done](docs/screenshots/desktop-done.png) |
+
+### Mobile
+
+| Home | Ticket |
+|:---:|:---:|
+| ![Mobile home](docs/screenshots/mobile-home.png) | ![Mobile ticket](docs/screenshots/mobile-ticket.png) |
 
 ---
 
