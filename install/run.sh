@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
+#
 # Jira Dashboard — Bootstrap
 #
-# Usage: ./bootstrap.sh
+# Rules:
+#  - Fail loud, don't be smart.
+#  - Idempotent — safe to run multiple times.
+#  - Never touches your project data.
 #
-# Interactive setup that configures, installs, and starts the dashboard.
-# Idempotent — safe to run multiple times. Never touches your project data.
-# Fails loud on any unexpected condition.
+# Usage: ./bootstrap.sh
 
 set -euo pipefail
 export LC_ALL=C
