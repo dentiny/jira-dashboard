@@ -27,15 +27,13 @@ Opens http://localhost:3006.
 3. Loads `<project>/.env` and injects into `process.env` — coder CLI inherits these
 4. `config.json` values are fallbacks for everything
 
-## Caveats
+### Caveats
 
 - **API keys** go in `<project>/.env` (not `.jira-dashboard/.env`). Only the project root `.env` is passed to the coder child process.
 - **Linux only** — resource monitor reads `/proc/<pid>/stat`.
 - **Python venv** — `VIRTUAL_ENV` and `.venv/bin/` are prepended automatically.
 
----
-
-## Screenshots
+## Workflow
 
 The full ticket lifecycle, board to merge — click any card to open the popup.
 
@@ -53,8 +51,6 @@ The full ticket lifecycle, board to merge — click any card to open the popup.
 |:---:|:---:|
 | ![Mobile home](docs/screenshots/mobile-home.png) | ![Mobile ticket](docs/screenshots/mobile-ticket.png) |
 
----
-
 ## For Maintainers
 
 ```bash
@@ -67,3 +63,4 @@ npm run test:config # config loader only
 ```bash
 git config core.hooksPath .githooks
 ```
+
