@@ -36,6 +36,7 @@ Tested: local + opencode + linux only.
 
 ## Features
 
+- Multi local repo read-only reference — optional `referenceRepos` array in config. Paths injected into coder prompts so the AI can read/write across multiple repos while each ticket stays tied to one primary repo/worktree.
 - Selfhost — use jira-dashboard to develop jira-dashboard itself.
 - Adopt pyxen for deployment config management.
 - Tighten coder runtime env — launch coder CLI from the worktree dir so each ticket session runs in its own sandbox.
