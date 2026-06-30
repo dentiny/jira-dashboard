@@ -15,7 +15,7 @@ Tested: local + opencode + linux only.
 
 - Test runner is Python-only (`python -m project.test`). Broken for JS/Go/Rust.
 - Client UI hardcodes `"main"` in user-facing strings (App.tsx:918,1438).
-- Resource monitor is Linux-only (`/proc/pid/stat`, page size, clk_tck).
+- Resource monitor has Linux (`/proc/pid/stat`) and macOS (`ps`) implementations. Consider a native `proc_pidinfo` addon (napi-rs) for lower overhead on macOS — ship prebuilt binaries to avoid requiring Xcode.
 - VSCode/Cursor URI schemes only. Other editors get dead links.
 - Python venv assumptions (`VIRTUAL_ENV`, `PATH` prepend) irrelevant for non-Python projects.
 - `better-sqlite3` native module version must match Node.js exactly.

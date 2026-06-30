@@ -3,10 +3,9 @@
 // New backends: add a file under coder/<name>.js and register it below.
 
 const { spawn } = require('child_process');
-const fs = require('fs');
-const os = require('os');
 const config = require('../config');
 const store = require('./store');
+const { createResourceMonitor } = require('../monitor');
 
 const opencode = require('./opencode')(config, store);
 const claude = require('./claude')(config, store);
@@ -56,7 +55,15 @@ function run(prompt, opts = {}) {
 
     let stdout = '';
     let stderr = '';
-    const resMonitor = startResourceMonitor(proc.pid, onProgress);
+    const resMonitor = createResourceMonitor(proc.pid, data => {
+      if (!onProgress) return;
+      let tokensStr = '';
+      try {
+        const s = resolveBackend().stats();
+        if (s.input) tokensStr = ` tokens_in=${s.input} tokens_out=${s.output} cost=$${s.cost || ''}`;
+      } catch {}
+      onProgress(`[resource] cpu=${data.cpuSec}s mem=${data.memMB}MB threads=${data.threads} elapsed=${data.elapsed}s ncores=${data.ncores}${tokensStr}`);
+    });
 
     proc.stdout.on('data', d => {
       const chunk = d.toString();
@@ -71,7 +78,7 @@ function run(prompt, opts = {}) {
     proc.stderr.on('data', d => { stderr += d.toString(); });
 
     proc.on('close', code => {
-      clearInterval(resMonitor.interval);
+      if (resMonitor) resMonitor.close();
       const raw = stdout.trim();
       const output = backend.parseOutput ? backend.parseOutput(raw) : raw;
       if (code === 0) {
@@ -89,50 +96,10 @@ function run(prompt, opts = {}) {
     });
 
     proc.on('error', err => {
-      clearInterval(resMonitor.interval);
+      if (resMonitor) resMonitor.close();
       reject(err);
     });
   });
 }
 
-function startResourceMonitor(pid, onProgress) {
-  const clkTck = 100;
-  const ncores = os.cpus().length;
-  const PAGE_SIZE = 4096;
-  let peakMem = 0;
-  const startTime = Date.now();
-
-  const interval = setInterval(() => {
-    try {
-      const raw = fs.readFileSync(`/proc/${pid}/stat`, 'utf-8');
-      const afterParen = raw.slice(raw.lastIndexOf(')') + 2);
-      const fields = afterParen.split(' ');
-      const utime = parseInt(fields[11]) || 0;
-      const stime = parseInt(fields[12]) || 0;
-      const rss = parseInt(fields[21]) || 0;
-      const threads = parseInt(fields[17]) || 1;
-      const cpuSec = ((utime + stime) / clkTck).toFixed(1);
-      const memMB = rss * PAGE_SIZE / (1024 * 1024);
-      const memStr = memMB.toFixed(1);
-      if (memMB > peakMem) peakMem = memMB;
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-
-      let tokensIn = '', tokensOut = '', runCost = '';
-      try {
-        const s = resolveBackend().stats();
-        tokensIn = s.input || '';
-        tokensOut = s.output || '';
-        runCost = String(s.cost || '');
-      } catch {}
-      let tokensStr = '';
-      if (tokensIn) tokensStr = ` tokens_in=${tokensIn} tokens_out=${tokensOut} cost=$${runCost}`;
-
-      const resStr = `cpu=${cpuSec}s mem=${memStr}MB threads=${threads} elapsed=${elapsed}s ncores=${ncores}${tokensStr}`;
-      if (onProgress) onProgress(`[resource] ${resStr}`);
-    } catch { /* proc gone */ }
-  }, 3000);
-
-  return { interval, peakMem: () => peakMem };
-}
-
-module.exports = { run, getStats, getLastSessionId, startResourceMonitor };
+module.exports = { run, getStats, getLastSessionId };
