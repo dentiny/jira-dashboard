@@ -1012,25 +1012,35 @@ app.post('/api/tickets/:id/rebase', async (req, res) => {
       db.logActivity(ticket.id, 'rebase_conflict', `Conflicts in ${conflictFiles.length} files`);
       db.updateTicketField(ticket.id, 'status', 'idle');
 
-      // Build prompt for the coder to resolve conflicts
-      const worktreePath = ticket.worktree_path;
+      // Build context file with conflict details for the coder
+      const conflictDetails = [
+        `Default branch: ${config.branchDefault}`,
+        `Worktree: ${ticket.worktree_path}`,
+        `Conflicted files:\n${conflictFiles.join('\n') || '(unknown)'}`,
+        '',
+        'Git status:',
+        '```',
+        gitStatus || '(unavailable)',
+        '```',
+      ];
+      const ctxSections = [
+        { title: 'Ticket title', body: ticket.title },
+        { title: 'Ticket content', body: ticket.content },
+        { title: 'Rebase conflict details', body: conflictDetails.join('\n') },
+      ];
+      const contextFile = writeTicketContext(ticket.id, ctxSections);
       const resolvePrompt = `You are resolving git rebase conflicts for a ticket in the ${config.projectName} project.
 
-The worktree at ${worktreePath} has conflicts after \`git rebase ${config.branchDefault}\`.
-
-Git status:
-${gitStatus}
-
-Conflicted files:
-${conflictFiles.join('\n')}
-
 Your job:
-1. Read the conflicted files
-2. Resolve the merge conflicts by editing the files
-3. Run \`git add\` on the resolved files to mark them as resolved
-4. Run \`git rebase --continue\` to complete the rebase
+1. Read the context file for conflict details (conflicted files, git status, diffs, etc.)
+2. Read the conflicted files in the worktree at ${ticket.worktree_path}
+3. Resolve the merge conflicts by editing the files
+4. Run \`git add\` on the resolved files to mark them as resolved
+5. Run \`git rebase --continue\` to complete the rebase
 
-Output ONLY valid JSON conforming to the schema at: ${config.projectDir}/resolve-conflict.schema.json`;
+Output ONLY valid JSON conforming to the schema at: ${config.projectDir}/resolve-conflict.schema.json
+
+Read full ticket context at: ${contextFile}`;
 
       db.updateTicketField(ticket.id, 'status', 'running');
       try {

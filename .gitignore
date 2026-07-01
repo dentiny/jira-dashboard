@@ -31,4 +31,6 @@ opencode.json
 .opencode-data/
 
 # Selfhosting
-.jira-dashboard/.worktrees/
+.jira-dashboard/
+
+.worktrees/
