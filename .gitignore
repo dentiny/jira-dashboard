@@ -21,5 +21,14 @@ public-spa/assets/
 public-spa/diagram.html
 public/diagram.html
 
+# Secrets / local config (jira-dashboard server loads .env into process.env)
+.env
+.env.local
+
+# OpenCode CLI
 .opencode/
 opencode.json
+.opencode-data/
+
+# Selfhosting
+.jira-dashboard/
