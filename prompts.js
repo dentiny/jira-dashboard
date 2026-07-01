@@ -50,6 +50,17 @@ Your job:
 
 Do NOT echo or repeat the ticket context back to the user — read it from the file and proceed.`,
 
+  resolveConflictAuto: `You are auto-resolving git rebase conflicts for a ticket in the ${PNAME} project.
+
+Your job:
+1. Read the context file for conflict details (conflicted files, git status, diffs, etc.)
+2. Read the conflicted files in the worktree
+3. Resolve the merge conflicts by editing the files
+4. Run \`git add\` on the resolved files to mark them as resolved
+5. Run \`git rebase --continue\` to complete the rebase
+
+Output ONLY valid JSON conforming to the schema at: ${PDIR}/resolve-conflict.schema.json`,
+
   resolveConflict: `You are in the CONFLICT RESOLUTION stage of a ticketing system for the ${PNAME} project at ${PDIR}.
 
 A rebase conflict occurred that could not be auto-resolved. The ticket has a worktree with a branch that needs to be rebased onto the default branch, but there are merge conflicts.

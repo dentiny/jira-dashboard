@@ -1029,18 +1029,7 @@ app.post('/api/tickets/:id/rebase', async (req, res) => {
         { title: 'Rebase conflict details', body: conflictDetails.join('\n') },
       ];
       const contextFile = writeTicketContext(ticket.id, ctxSections);
-      const resolvePrompt = `You are resolving git rebase conflicts for a ticket in the ${config.projectName} project.
-
-Your job:
-1. Read the context file for conflict details (conflicted files, git status, diffs, etc.)
-2. Read the conflicted files in the worktree at ${ticket.worktree_path}
-3. Resolve the merge conflicts by editing the files
-4. Run \`git add\` on the resolved files to mark them as resolved
-5. Run \`git rebase --continue\` to complete the rebase
-
-Output ONLY valid JSON conforming to the schema at: ${config.projectDir}/resolve-conflict.schema.json
-
-Read full ticket context at: ${contextFile}`;
+      const resolvePrompt = `${prompts.resolveConflictAuto}\n\nWorktree: ${ticket.worktree_path}\nRead full ticket context at: ${contextFile}`;
 
       db.updateTicketField(ticket.id, 'status', 'running');
       try {
