@@ -76,7 +76,11 @@ function run(prompt, opts = {}) {
       if (onProgress) {
         chunk.split('\n').filter(l => l.trim()).forEach(l => {
           const formatted = backend.formatProgress ? backend.formatProgress(l) : null;
-          onProgress(formatted !== null ? formatted : l);
+          if (formatted !== null) {
+            onProgress(formatted);
+          } else if (!/^\s*[{[]/.test(l)) {
+            onProgress(l);
+          }
         });
       }
     });
