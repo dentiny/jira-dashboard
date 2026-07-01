@@ -1,55 +1,62 @@
 # Jira Dashboard
 
-A kanban board for todo-driven development with AI agents.
+**From a one-line idea to a reviewed PR — in one board.**
 
-Start with ambiguity — a rough idea, a user complaint, a TODO scribbled in a doc.
-The agent asks clarifying questions, proposes a plan, implements in an isolated
-worktree, and runs tests. You review, give feedback, and close. Human and agent
-in the loop, no context switches, no ticket groomers.
+A kanban where AI coding agents are first-class teammates. Type a rough idea,
+a user complaint, a TODO scribbled in a doc — the agent asks clarifying
+questions, proposes a plan, implements in an isolated git worktree, runs
+tests, and hands you a branch to review. Human in the loop, no context
+switching, no ticket groomers.
+
+![Architecture](docs/architecture.svg)
 
 ## Quick Start
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/Cutuy/jira-dashboard.git
 cd jira-dashboard
-./bootstrap.sh   # interactive — prompts for project path, coder CLI, etc.
+./bootstrap.sh            # interactive — prompts for project path, coder CLI, etc.
 ```
 
-Opens http://localhost:3006.
+Opens <http://localhost:3006>. The install script:
+
+- prompts for the project repo you want to track (any git repo)
+- wires the dashboard `.env` and a systemd / launchd service for you
+- builds the client and starts the server
+
+To track multiple projects, run `./bootstrap.sh` again with a different port.
+
+## How a ticket flows
+
+| Stage | What happens | Desktop |
+|:------|:-------------|:--------|
+| **Backlog** | You add a one-line idea. The agent reads it. | ![Backlog](docs/screenshots/desktop-home.png) |
+| **Clarification** | The agent asks the questions a thoughtful teammate would. You answer in the same popup. | ![Clarification](docs/screenshots/desktop-clarification.png) |
+| **Implementation** | The agent writes code in an isolated worktree, commits as it goes, streams progress to the card. | ![Implementation](docs/screenshots/desktop-implementation.png) |
+| **Review** | Branch diff + test output are inline. You give feedback or accept. | ![Review](docs/screenshots/desktop-review.png) |
+| **Done** | Cherry-picked onto your default branch. Card closes. | ![Done](docs/screenshots/desktop-done.png) |
+
+Mobile works too — same board, same ticket popup.
+
+| Home | Ticket |
+|:----:|:-------|
+| ![Mobile home](docs/screenshots/mobile-home.png) | ![Mobile ticket](docs/screenshots/mobile-ticket.png) |
+
+## Why this and not (X)
+
+Honest comparison — pick what actually fits your workflow:
+
+- **vs Linear + Claude Code manually.** Linear is great for human-only work, but every "implement this ticket" still means copy-paste between Linear and your terminal. Jira Dashboard does that handoff for you, runs locally, no account needed.
+- **vs TaskMaster / claude-task-master.** Those lock you into one editor (usually Cursor) and stop at a task list. This runs the full lifecycle — clarification, implementation in a worktree, tests, branch ready to merge — and works with any AI CLI you point it at.
+- **vs Devin / bolt.new / v0.** Those are cloud sandboxes with their own billing. This runs on your laptop, uses your existing API keys, owns no data. You keep the agent choice.
 
 ## Configuration
 
 | Where | What |
-|---|---|
-| `<project>/.jira-dashboard/.env` | Dashboard settings (port, project name, coder bin) |
-| `<project>/.env` | Environment for the coder subprocess (API keys, venv) |
-| `config.json` | Structural defaults (timeouts) |
-
-## Workflow
-
-The full ticket lifecycle, board to merge — click any card to open the popup.
-
-| Stage | Desktop |
-|:---:|:---:|
-| Home | ![Desktop home](docs/screenshots/desktop-home.png) |
-| Clarification | ![Clarification](docs/screenshots/desktop-clarification.png) |
-| Implementation | ![Implementation](docs/screenshots/desktop-implementation.png) |
-| Review | ![Review](docs/screenshots/desktop-review.png) |
-| Done | ![Done](docs/screenshots/desktop-done.png) |
-
-### Mobile
-
-| Home | Ticket |
-|:---:|:---:|
-| ![Mobile home](docs/screenshots/mobile-home.png) | ![Mobile ticket](docs/screenshots/mobile-ticket.png) |
-
-## Advanced usage
-
-```bash
-npm test            # run all tests
-npm run test:config # config loader only
-git config core.hooksPath .githooks # pre-push hook
-```
+|-------|------|
+| `<project>/.jira-dashboard/.env` | Dashboard settings (port, project name, coder CLI path) |
+| `<project>/.env` | Environment injected into the coder subprocess — **API keys go here** |
+| `config.json` | Structural defaults (timeouts, venv path, test command) |
 
 ### How config loading works
 
@@ -58,12 +65,38 @@ git config core.hooksPath .githooks # pre-push hook
 3. Loads `<project>/.env` and injects into `process.env` — coder CLI inherits these
 4. `config.json` values are fallbacks for everything
 
-### Caveats
+See [`.env.example`](.env.example) for the keys the dashboard reads.
 
-- **API keys** go in `<project>/.env` (not `.jira-dashboard/.env`). Only the project root `.env` is passed to the coder child process.
-- **Linux only** — resource monitor reads `/proc/<pid>/stat`.
-- **Python venv** — `VIRTUAL_ENV` and `.venv/bin/` are prepended automatically.
+## Coder backends
 
-### Architecture
+The dashboard is backend-agnostic. It speaks to whichever AI coding CLI is on your `PATH`. Out of the box:
 
-![Architecture](docs/architecture.svg)
+- **opencode** — fully implemented (the default)
+- **claude code**, **codex** — stubs ready, see [`coder/`](coder/) for the adapter interface
+- **dummy** — for testing the pipeline without burning tokens
+
+Adding a new backend is a single file under `coder/<name>.js` exporting `{ name, buildArgs, buildEnv, formatProgress, parseOutput }`.
+
+## Status & honest limits
+
+This is a working v0.1 — it's the dashboard we're dogfooding on this very repo.
+
+- ✅ Linux + macOS service install (systemd / launchd)
+- ⚠️ Resource monitor is Linux-only (`/proc/<pid>/stat`). macOS falls back to `ps`.
+- ⚠️ Test runner assumes Python (`python -m project.test`). JS / Go / Rust projects need a custom command in `config.json`.
+- ⚠️ Pre-push hook assumes `gh` CLI for pushing branches. See [`.githooks/`](.githooks/).
+
+See [`docs/todo.md`](docs/todo.md) for the full roadmap. Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Advanced usage
+
+```bash
+npm test                  # run all tests
+npm run test:config       # config loader only
+npm run test:prompts      # prompt templates only
+git config core.hooksPath .githooks   # install pre-push hook
+```
+
+## License
+
+[MIT](LICENSE) — © 2026 Cutuy
