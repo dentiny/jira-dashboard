@@ -7,9 +7,14 @@ module.exports = function codexBackend(config, store) {
     stats() { return store.lastUsage; },
 
     buildArgs(prompt, sessionId, title) {
-      const args = sessionId
-        ? ['exec', 'resume', sessionId, prompt, '--json']
-        : ['exec', prompt, '--json'];
+      const args = ['exec'];
+      if (sessionId === '--last') {
+        args.push('resume', '--last');
+      } else if (sessionId) {
+        args.push('resume', sessionId);
+      }
+      args.push('--json');
+      args.push(prompt);
       return args;
     },
 
@@ -38,10 +43,12 @@ module.exports = function codexBackend(config, store) {
             const evt = JSON.parse(line);
             if (evt.type === 'thread.started' && evt.thread_id) store.setSessionId(evt.thread_id);
             if (evt.type === 'turn.completed' && evt.usage) {
+              const input = parseInt(evt.usage.input_tokens, 10) || 0;
+              const output = parseInt(evt.usage.output_tokens, 10) || 0;
               store.setUsage({
                 cost: 0,
-                input: String(evt.usage.input_tokens || 0),
-                output: String(evt.usage.output_tokens || 0),
+                input: String(input),
+                output: String(output),
               });
             }
             if (evt.type === 'item.completed' && evt.item?.type === 'agent_message') {

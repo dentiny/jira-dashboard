@@ -37,12 +37,12 @@
       "type": "object",
       "properties": {
         "type": {
-          "description": "Coder backend to use (e.g. opencode, dummy). Override with JIRA_CODER_TYPE in .env.",
+          "description": "Coder backend to use (e.g. opencode, codex, dummy). Override with JIRA_CODER_TYPE in .env.",
           "type": "string",
           "default": "opencode"
         },
         "bin": {
-          "description": "Path to the coder CLI binary. Override with JIRA_CODER_BIN in .env.",
+          "description": "Path to the coder CLI binary (e.g. opencode, codex, claude). Override with JIRA_CODER_BIN in .env.",
           "type": "string",
           "default": "opencode"
         },
