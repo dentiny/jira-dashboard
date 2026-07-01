@@ -131,4 +131,54 @@ const os = require('os');
   console.log('PASS: uid');
 })();
 
+// ── isWorktreeDirty (post-stage invariant) ────────────────
+(function testIsWorktreeDirty() {
+  // Mirror of the helper in server.js
+  function isWorktreeDirty(statusOutput) {
+    return !!(statusOutput && statusOutput.trim());
+  }
+
+  // Empty / whitespace-only = clean
+  assert.strictEqual(isWorktreeDirty(''), false, 'empty status = clean');
+  assert.strictEqual(isWorktreeDirty('   '), false, 'whitespace = clean');
+  assert.strictEqual(isWorktreeDirty('\n\n'), false, 'newlines = clean');
+  assert.strictEqual(isWorktreeDirty(undefined), false, 'undefined = clean');
+  assert.strictEqual(isWorktreeDirty(null), false, 'null = clean');
+
+  // Any non-empty porcelain output = dirty
+  assert.strictEqual(isWorktreeDirty(' M foo.ts'), true, 'unstaged = dirty');
+  assert.strictEqual(isWorktreeDirty('M  foo.ts'), true, 'staged = dirty');
+  assert.strictEqual(isWorktreeDirty('A  foo.ts'), true, 'added = dirty');
+  assert.strictEqual(isWorktreeDirty('D  foo.ts'), true, 'deleted = dirty');
+  assert.strictEqual(isWorktreeDirty('?? untracked.txt'), true, 'untracked = dirty');
+  assert.strictEqual(isWorktreeDirty('UU conflict.ts'), true, 'conflict = dirty');
+  assert.strictEqual(isWorktreeDirty(' M foo.ts\n?? new.txt'), true, 'multi-line = dirty');
+
+  console.log('PASS: isWorktreeDirty');
+})();
+
+// ── escShell escapes apostrophes (cherry-pick safety) ─────
+(function testEscShellApostrophe() {
+  // Mirror of the helper in server.js (post-fix)
+  function escShell(str) { return str.replace(/[\\'"$`]/g, '\\$&'); }
+
+  // Backslash, double-quote, dollar, backtick — already worked
+  assert.strictEqual(escShell('plain'), 'plain', 'plain passes through');
+  assert.strictEqual(escShell('a"b'), 'a\\"b', 'double-quote escaped');
+  assert.strictEqual(escShell('a$b'), 'a\\$b', 'dollar escaped');
+  assert.strictEqual(escShell('a`b'), 'a\\`b', 'backtick escaped');
+  assert.strictEqual(escShell('a\\b'), 'a\\\\b', 'backslash escaped');
+
+  // Apostrophe — this is the bug we just fixed
+  assert.strictEqual(escShell("Live status shows raw JSON"),
+    "Live status shows raw JSON", 'apostrophe-free text unchanged');
+  assert.strictEqual(escShell("It's a test"), "It\\'s a test",
+    'apostrophe now escaped (this is the fix)');
+  assert.strictEqual(escShell('"Live status" shows raw JSON'),
+    '\\"Live status\\" shows raw JSON',
+    'double-quotes in real ticket titles now safe');
+
+  console.log('PASS: escShell escapes apostrophes');
+})();
+
 console.log('\n✅ All server-helper tests passed\n');

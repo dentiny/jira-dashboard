@@ -218,7 +218,43 @@ function runGit(args, cwd) {
 }
 
 function escShell(str) {
-  return str.replace(/[\\"$`]/g, '\\$&');
+  return str.replace(/[\\'"$`]/g, '\\$&');
+}
+
+// Pop the worktree's stash (if any) and re-stage all changes.
+// `git stash pop` (without --index) restores changes as unstaged, which
+// leaves the worktree in a "dirty but unstaged" state that's easy to miss
+// and impossible to commit without a follow-up `git add`. Always staging
+// after pop keeps the worktree in a committable state across the rebase.
+function popStashAndStage(worktreePath) {
+  try { runGit(`stash pop`, worktreePath); } catch {}
+  runGit(`add -A`, worktreePath);
+}
+
+// True if `git status --porcelain` output indicates a dirty worktree.
+// Empty output (or whitespace-only) means clean. Untracked files, staged
+// changes, and unstaged changes all count as dirty.
+function isWorktreeDirty(statusOutput) {
+  return !!(statusOutput && statusOutput.trim());
+}
+
+// Post-stage invariant: log a `worktree_uncommitted` activity entry if the
+// worktree has any uncommitted state. Called after every "stable" stage
+// transition (implement, rebase, cherry-pick) so the issue is visible in
+// the activity log instead of silently sitting in the working tree.
+function assertWorktreeClean(ticket, { stage, allow = false } = {}) {
+  if (!ticket || !ticket.worktree_path) return;
+  if (!fs.existsSync(path.join(ticket.worktree_path, '.git'))) return;
+  let status = '';
+  try {
+    status = runGit(`status --porcelain`, ticket.worktree_path);
+  } catch {
+    return; // git failed; not safe to assert
+  }
+  if (!allow && isWorktreeDirty(status)) {
+    db.logActivity(ticket.id, 'worktree_uncommitted',
+      `After ${stage}: ${status.slice(0, 200).replace(/\n/g, ' | ')}`);
+  }
 }
 
 function ensureWorktreesDir() {
@@ -878,6 +914,7 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
       db.updateTicket(ticket.id, { commit_sha: commitSha || null, stage: 'review', status: 'idle' });
     }
     db.logActivity(ticket.id, 'implement_done', diffSummary.slice(0, 500));
+    assertWorktreeClean(ticket, { stage: 'implement' });
 
     const testRunId = runTicketTests(ticket.id, 'auto');
 
@@ -953,12 +990,13 @@ app.post('/api/tickets/:id/rebase', async (req, res) => {
     // Attempt the rebase
     try {
       runGit(`rebase ${config.branchDefault}`, ticket.worktree_path);
-      if (hadStash) { try { runGit(`stash pop`, ticket.worktree_path); } catch {} }
+      if (hadStash) popStashAndStage(ticket.worktree_path);
 
       const newSha = runGit(`rev-parse HEAD`, ticket.worktree_path);
       db.logActivity(ticket.id, 'rebase_done', `Rebased onto ${config.branchDefault}: ${newSha.slice(0, 7)}`);
       db.updateTicketField(ticket.id, 'status', 'idle');
       db.updateTicketField(ticket.id, 'commit_sha', newSha);
+      assertWorktreeClean(ticket, { stage: 'rebase' });
       sseBroadcast(ticket.id, 'stdout', { text: `Rebase complete: ${newSha.slice(0, 7)}` });
       return res.json({ success: true, commit_sha: newSha, ticket: db.getTicket(ticket.id) });
     } catch (rebaseErr) {
@@ -1017,11 +1055,12 @@ If you CANNOT resolve the conflicts, output the word UNRESOLVABLE on its own lin
           db.updateTicketField(ticket.id, 'status', 'running');
           try {
             runGit(`rebase --continue`, ticket.worktree_path);
-            if (hadStash) { try { runGit(`stash pop`, ticket.worktree_path); } catch {} }
+            if (hadStash) popStashAndStage(ticket.worktree_path);
             const newSha = runGit(`rev-parse HEAD`, ticket.worktree_path);
             db.logActivity(ticket.id, 'rebase_done', `Coder resolved conflicts. Rebased onto ${config.branchDefault}: ${newSha.slice(0, 7)}`);
             db.updateTicketField(ticket.id, 'status', 'idle');
             db.updateTicketField(ticket.id, 'commit_sha', newSha);
+            assertWorktreeClean(ticket, { stage: 'rebase-resolved' });
             sseBroadcast(ticket.id, 'stdout', { text: `Rebase complete after conflict resolution: ${newSha.slice(0, 7)}` });
             return res.json({ success: true, commit_sha: newSha, note: 'Coder resolved conflicts', ticket: db.getTicket(ticket.id) });
           } catch (continueErr) {
@@ -1032,7 +1071,7 @@ If you CANNOT resolve the conflicts, output the word UNRESOLVABLE on its own lin
 
         // Coder couldn't resolve — abort rebase, generate conflict clarification questions
         try { runGit(`rebase --abort`, ticket.worktree_path); } catch {}
-        if (hadStash) { try { runGit(`stash pop`, ticket.worktree_path); } catch {} }
+        if (hadStash) popStashAndStage(ticket.worktree_path);
 
         db.logActivity(ticket.id, 'rebase_coder_unresolved', `Coder could not resolve conflicts in ${conflictFiles.length} files`);
         await generateConflictClarification(ticket, conflictFiles, gitStatus, resolveOutput);
@@ -1051,7 +1090,7 @@ If you CANNOT resolve the conflicts, output the word UNRESOLVABLE on its own lin
       } catch (coderErr) {
         // Coder itself crashed/errored — generate conflict clarification questions
         try { runGit(`rebase --abort`, ticket.worktree_path); } catch {}
-        if (hadStash) { try { runGit(`stash pop`, ticket.worktree_path); } catch {} }
+        if (hadStash) popStashAndStage(ticket.worktree_path);
 
         db.logActivity(ticket.id, 'rebase_coder_error', coderErr.message.slice(0, 200));
         await generateConflictClarification(ticket, conflictFiles, gitStatus, null);
@@ -1144,6 +1183,7 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
     runGit(`commit -m "${escShell(commitMsg)}"`, ticket.worktree_path);
     commitSha = runGit(`rev-parse HEAD`, ticket.worktree_path);
     db.logActivity(ticket.id, 'committed', commitSha);
+    assertWorktreeClean(ticket, { stage: 'cherry-pick' });
 
     let prUrl = null;
     if (config.mergeStrategy === 'pr') {
