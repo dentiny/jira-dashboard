@@ -1215,7 +1215,19 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
         try { runGit(`checkout ${config.branchDefault}`); } catch {}
       }
 
-      runGit(`cherry-pick ${commitSha}`);
+      try {
+        runGit(`cherry-pick ${commitSha}`);
+      } catch (err) {
+        try { runGit(`cherry-pick --abort`); } catch {}
+        db.logActivity(ticket.id, 'cherry_pick_conflict',
+          `Cherry-pick conflict on ${ticket.branch_name}. User should rebase onto ${config.branchDefault} first.`);
+        res.status(409).json({
+          error: `Cherry-pick conflicts with ${config.branchDefault}. ` +
+            `Rebase ${ticket.branch_name} onto ${config.branchDefault} first, resolve conflicts there, then try again.`,
+          ticket: db.getTicket(ticket.id)
+        });
+        return;
+      }
       db.logActivity(ticket.id, 'cherry_picked', commitSha);
     }
 
