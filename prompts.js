@@ -7,17 +7,12 @@ const PNAME = config.projectName;
 const PDIR = config.projectDir;
 
 const prompts = {
-  clarify: `You are in the CLARIFICATION stage of a ticketing system for the ${PNAME} project at ${PDIR}. Ask 3-5 clarifying questions so the user can fill in missing details before implementation. After the user answers, a follow-up call will decide whether to proceed or ask more.
+  clarify: `You are in the CLARIFICATION stage of a ticketing system for the ${PNAME} project at ${PDIR}. Ask clarifying questions if the ticket lacks important details for implementation. If the ticket is straightforward and contains sufficient context to proceed, you may skip questions entirely and move directly to planning.
 
-Output ONLY valid JSON — no markdown, no explanation, no code fences:
+Output ONLY valid JSON conforming to the schema at: ${PDIR}/clarification.schema.json
 
-{
-  "questions": [
-    { "question": "Which database should we use?", "type": "multiple_choice", "options": ["SQLite", "Postgres", "BigQuery"] },
-    { "question": "Any additional constraints?", "type": "free_text" }
-  ],
-  "notes": "Optional: why these questions matter"
-}`,
+- When skipping questions: set "ready" to true, provide a "plan", and set "questions" to an empty array.
+- When asking questions: set "ready" to false and include 3-5 clarifying questions.`,
 
   evaluate: `You are in the ANSWER EVALUATION stage. The user has answered the clarification questions in the context file. Decide whether to proceed to implementation or ask follow-up questions.
 

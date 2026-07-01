@@ -577,6 +577,25 @@ app.post('/api/tickets/:id/clarify', async (req, res) => {
     const questions = parsed.questions || [];
     const notes = parsed.notes || '';
 
+    // If the LLM determined the ticket is straightforward, skip questions
+    // and proceed directly to implementation with the provided plan.
+    if (parsed.ready && (!questions || questions.length === 0)) {
+      const planText = formatPlanText(parsed.plan);
+      db.deleteQuestionsForTicket(ticket.id);
+      db.updateTicket(ticket.id, {
+        plan: planText,
+        estimated_complexity: parsed.estimated_complexity || null,
+        plan_notes: notes || null,
+        review_feedback: null,
+        stage: 'implementation',
+      });
+      db.logActivity(ticket.id, 'clarified_skip', planText.slice(0, 200));
+      if (parsed.files_to_modify) {
+        db.logActivity(ticket.id, 'files_affected', parsed.files_to_modify.join(', '));
+      }
+      return res.json({ clarified: true, plan: planText, notes, ticket: db.getTicket(ticket.id) });
+    }
+
     db.deleteQuestionsForTicket(ticket.id);
     for (const q of questions) {
       if (typeof q === 'string') {

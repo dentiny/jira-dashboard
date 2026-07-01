@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Clarification Output",
+  "description": "Output format for the CLARIFICATION stage of the ticketing system. Ask questions if the ticket lacks important details. If the ticket is straightforward and contains sufficient context, skip questions and proceed to planning.",
+  "type": "object",
+  "properties": {
+    "questions": {
+      "type": "array",
+      "description": "Clarifying questions for the user. Must be an empty array when ready is true.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "The clarifying question to ask the user"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["free_text", "multiple_choice"],
+            "description": "Type of answer expected"
+          },
+          "options": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Choices for multiple_choice questions (omit for free_text)"
+          }
+        },
+        "required": ["question", "type"]
+      }
+    },
+    "ready": {
+      "type": "boolean",
+      "description": "Set to true when no clarifying questions are needed and implementation can proceed directly with the provided plan"
+    },
+    "plan": {
+      "type": "string",
+      "description": "Implementation plan describing the approach, key files to change, and order of operations. Required when ready is true."
+    },
+    "estimated_complexity": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Estimated complexity of the implementation"
+    },
+    "files_to_modify": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of file paths expected to be created or modified"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional explanation: why questions were asked (or skipped), notable assumptions, risks, or edge cases"
+    }
+  },
+  "required": ["questions", "ready"],
+  "if": {
+    "properties": { "ready": { "const": true } }
+  },
+  "then": {
+    "required": ["plan"]
+  }
+}
