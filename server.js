@@ -217,6 +217,10 @@ function runGit(args, cwd) {
   }).trim();
 }
 
+function escShell(str) {
+  return str.replace(/[\\"$`]/g, '\\$&');
+}
+
 function ensureWorktreesDir() {
   if (!fs.existsSync(config.worktreesDir)) {
     fs.mkdirSync(config.worktreesDir, { recursive: true });
@@ -233,7 +237,7 @@ function commitWorktreeChanges(worktreePath, ticketId, message, { partial = fals
       return null;
     }
     runGit(`add -A`, worktreePath);
-    runGit(`commit -m "${message.replace(/"/g, '')}"`, worktreePath);
+    runGit(`commit -m "${escShell(message)}"`, worktreePath);
     const sha = runGit(`rev-parse HEAD`, worktreePath);
     db.logActivity(ticketId, tag, `${sha.slice(0, 7)}: ${message.replace(/"/g, '')}`);
     return sha;
@@ -1137,7 +1141,7 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
       db.logActivity(ticket.id, 'squash_skipped', 'Could not find merge-base, committing as-is');
     }
 
-    runGit(`commit -m "${commitMsg}"`, ticket.worktree_path);
+    runGit(`commit -m "${escShell(commitMsg)}"`, ticket.worktree_path);
     commitSha = runGit(`rev-parse HEAD`, ticket.worktree_path);
     db.logActivity(ticket.id, 'committed', commitSha);
 
