@@ -705,18 +705,11 @@ export default function App() {
       const changed: string[] = []
       for (const t of d.tickets) {
         const old = prev.get(t.id)
-        if (old && old.stage !== t.stage) changed.push(t.id)
+        if (old && old.status === 'running' && t.status === 'idle' && old.stage !== t.stage && (t.stage === 'review' || t.stage === 'clarification' || t.stage === 'done')) changed.push(t.id)
       }
       prevTicketsRef.current = new Map(d.tickets.map(t => [t.id, t]))
       if (changed.length > 0) {
-        if (selRef.current === null) {
-          openRef.current(changed[0])
-          if (changed.length > 1) {
-            setHighlightedIds(prev => { const next = new Set(prev); for (let i = 1; i < changed.length; i++) next.add(changed[i]); return next })
-          }
-        } else {
-          setHighlightedIds(prev => { const next = new Set(prev); for (const id of changed) next.add(id); return next })
-        }
+        setHighlightedIds(prev => { const next = new Set(prev); for (const id of changed) next.add(id); return next })
       }
       setTickets(d.tickets)
     } catch {}
