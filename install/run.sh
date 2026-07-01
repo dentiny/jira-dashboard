@@ -70,6 +70,23 @@ if [ -n "$GIT_REMOTE" ]; then
   ok "Detected git remote: ${REMOTE_HOST}/${REMOTE_OWNER}/${REMOTE_REPO}"
 fi
 
+# Detect default branch from remote
+DEFAULT_BRANCH=""
+DETECTED_BRANCH=""
+LS_REMOTE_OUTPUT=$(git -C "$PROJECT_DIR" ls-remote --symref origin HEAD 2>/dev/null || true)
+if [ -z "$LS_REMOTE_OUTPUT" ]; then
+  fail "Could not detect default branch from remote 'origin'.
+  Make sure your repo has a remote named 'origin' and you have network access."
+fi
+DETECTED_BRANCH=$(echo "$LS_REMOTE_OUTPUT" | awk '/^ref: refs\/heads\// {print $2; exit}' | sed 's,refs/heads/,,')
+if [ -z "$DETECTED_BRANCH" ]; then
+  fail "Could not parse default branch from remote 'origin'.
+  Unexpected output from: git ls-remote --symref origin HEAD"
+fi
+info "Detected default branch: ${BOLD}${DETECTED_BRANCH}${NC}"
+response=$(prompt "Press Enter to accept, or type a different branch name [${DETECTED_BRANCH}]")
+DEFAULT_BRANCH="${response:-$DETECTED_BRANCH}"
+
 # Write .env (idempotent — never overwrites)
 ENV_DIR="${PROJECT_DIR}/.jira-dashboard"
 ENV_FILE="${ENV_DIR}/.env"
@@ -86,6 +103,7 @@ REMOTE_HOST=${REMOTE_HOST:-example-claw}
 EXPLORER_URL=${EXPLORER_URL}
 GITHUB_OWNER=${REMOTE_OWNER}
 GITHUB_REPO=${REMOTE_REPO}
+GIT_DEFAULT_BRANCH=${DEFAULT_BRANCH}
 EOF
   ok "Created ${ENV_FILE}"
 fi
