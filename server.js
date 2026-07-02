@@ -321,7 +321,7 @@ async function pushAndOpenPr(ticketId, branchName, title, worktreePath) {
     }
 
     if (ticketGone(ticketId)) return;
-    db.updateTicket(ticketId, { stage: 'done', status: 'idle' });
+    db.updateTicket(ticketId, { stage: 'done', status: 'idle', pr_url: prUrl });
   } catch (err) {
     if (ticketGone(ticketId)) return;
     db.logActivity(

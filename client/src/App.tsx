@@ -7,8 +7,25 @@ const OTHER_MARKER = '__other__'
 import {
   Loader2, Link as LinkIcon, ExternalLink, Play, Shield,
   RefreshCw, ArrowRight, X, ChevronRight, Circle, Copy, Check, Sun, Moon, Monitor,
-  GitBranch, Ban
+  GitBranch, GitPullRequest, Ban
 } from 'lucide-react'
+
+/* Extract a GitHub PR number from a PR URL (…/pull/123).
+   Returns null for compare/create fallback links (…/pull/new/branch). */
+function prNumberFromUrl(url?: string | null): number | null {
+  if (!url) return null
+  const m = url.match(/\/pull\/(\d+)(?:$|[/?#])/)
+  return m ? Number(m[1]) : null
+}
+
+/* Resolve a ticket's PR URL: prefer the persisted pr_url column, but fall
+   back to the pr_created / pr_link activity entry so tickets completed before
+   pr_url was persisted still surface their PR link. */
+function resolvePrUrl(t: { pr_url?: string | null; activity?: { action: string; detail: string }[] }): string | null {
+  if (t.pr_url) return t.pr_url
+  const entry = (t.activity || []).find(a => a.action === 'pr_created' || a.action === 'pr_link')
+  return entry?.detail || null
+}
 
 /* ─────────────────────────────────────────────────────────
    Domain types
@@ -37,7 +54,7 @@ interface TestRun {
 interface T {
   id: string; title: string; content: string; stage: string; status?: string
   plan: string | null; worktree_path: string | null; branch_name: string | null
-  commit_sha: string | null; review_feedback: string | null
+  commit_sha: string | null; pr_url?: string | null; review_feedback: string | null
   estimated_complexity?: string | null
   plan_notes?: string | null
   questions: Q[]; activity: A[]; created_at: string; updated_at: string
@@ -1621,13 +1638,35 @@ export default function App() {
                 {/* Done */}
                 {sel.stage === 'done' && (
                   <>
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3.5 flex items-start gap-2.5">
-                      <Check className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
-                      <div className="t-body text-emerald-900">
-                        Merged into main · Commit{' '}
-                        <code className="t-mono-12 text-emerald-800">{sel.commit_sha || 'N/A'}</code>
+                    {cfg.mergeStrategy === 'pr' && resolvePrUrl(sel) ? (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3.5 flex items-start gap-2.5">
+                        <GitPullRequest className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
+                        <div className="t-body text-emerald-900">
+                          PR opened ·{' '}
+                          <a
+                            href={resolvePrUrl(sel)!}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-medium underline underline-offset-2 hover:text-emerald-700 inline-flex items-center gap-1"
+                          >
+                            {prNumberFromUrl(resolvePrUrl(sel)) != null
+                              ? `#${prNumberFromUrl(resolvePrUrl(sel))}`
+                              : 'View PR'}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                          {' · Commit '}
+                          <code className="t-mono-12 text-emerald-800">{sel.commit_sha || 'N/A'}</code>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3.5 flex items-start gap-2.5">
+                        <Check className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
+                        <div className="t-body text-emerald-900">
+                          Merged into main · Commit{' '}
+                          <code className="t-mono-12 text-emerald-800">{sel.commit_sha || 'N/A'}</code>
+                        </div>
+                      </div>
+                    )}
                     {sel.plan && (
                       <Section
                         title="Implementation Plan"
@@ -1686,6 +1725,26 @@ export default function App() {
                       </Section>
                     )}
                   </>
+                )}
+
+                {sel.stage === 'closed' && cfg.mergeStrategy === 'pr' && resolvePrUrl(sel) && (
+                  <div className="rounded-lg border border-border bg-surface-3 p-3.5 flex items-start gap-2.5">
+                    <GitPullRequest className="h-4 w-4 text-ink-3 mt-0.5 shrink-0" />
+                    <div className="t-body text-ink-2">
+                      GitHub PR ·{' '}
+                      <a
+                        href={resolvePrUrl(sel)!}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium underline underline-offset-2 hover:text-ink-1 inline-flex items-center gap-1"
+                      >
+                        {prNumberFromUrl(resolvePrUrl(sel)) != null
+                          ? `#${prNumberFromUrl(resolvePrUrl(sel))}`
+                          : 'View PR'}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  </div>
                 )}
               </div>
 

@@ -26,6 +26,7 @@ db.exec(`
     worktree_path TEXT,
     branch_name TEXT,
     commit_sha TEXT,
+    pr_url TEXT,
     review_feedback TEXT,
     status TEXT DEFAULT 'idle',
     ocode_session TEXT,
@@ -85,6 +86,9 @@ try { db.exec(`ALTER TABLE activity ADD COLUMN stage TEXT`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN estimated_complexity TEXT`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN plan_notes TEXT`); } catch {}
 
+// Migration: add pr_url column to tickets (GitHub PR link for MERGE_STRATEGY=pr)
+try { db.exec(`ALTER TABLE tickets ADD COLUMN pr_url TEXT`); } catch {}
+
 // ── Prepared statements ───────────────────────────────────
 const stmts = {
   // Tickets
@@ -93,11 +97,11 @@ const stmts = {
   getAllTicketIds: db.prepare(`SELECT id FROM tickets`),
   insertTicket: db.prepare(`
     INSERT INTO tickets (id, title, content, stage, plan, worktree_path,
-      branch_name, commit_sha, review_feedback, status, ocode_session,
+      branch_name, commit_sha, pr_url, review_feedback, status, ocode_session,
       total_cpu, total_elapsed, token_cost, token_input, token_output,
       estimated_complexity, plan_notes, created_at, updated_at)
     VALUES (@id, @title, @content, @stage, @plan, @worktree_path,
-      @branch_name, @commit_sha, @review_feedback, @status, @ocode_session,
+      @branch_name, @commit_sha, @pr_url, @review_feedback, @status, @ocode_session,
       @total_cpu, @total_elapsed, @token_cost, @token_input, @token_output,
       @estimated_complexity, @plan_notes, @created_at, @updated_at)
   `),
@@ -105,7 +109,7 @@ const stmts = {
     UPDATE tickets SET
       title = @title, content = @content, stage = @stage, plan = @plan,
       worktree_path = @worktree_path, branch_name = @branch_name,
-      commit_sha = @commit_sha, review_feedback = @review_feedback,
+      commit_sha = @commit_sha, pr_url = @pr_url, review_feedback = @review_feedback,
       status = @status, ocode_session = @ocode_session,
       total_cpu = @total_cpu, total_elapsed = @total_elapsed,
       token_cost = @token_cost, token_input = @token_input,
@@ -230,6 +234,7 @@ function createTicket(data) {
     worktree_path: null,
     branch_name: null,
     commit_sha: null,
+    pr_url: null,
     review_feedback: null,
     ocode_session: null,
     total_cpu: null,
