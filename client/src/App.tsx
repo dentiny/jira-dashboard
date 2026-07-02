@@ -1522,37 +1522,6 @@ export default function App() {
                         )}
                       </Section>
                     )}
-                    {sel.worktree_path && (
-                      <Section title="Worktree">
-                        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 t-mono-12">
-                          <dt className="t-meta text-ink-2 uppercase tracking-wider self-center">Path</dt>
-                          <dd className="text-ink-1 break-all">{sel.worktree_path}</dd>
-                          <dt className="t-meta text-ink-2 uppercase tracking-wider self-center">Branch</dt>
-                          <dd className="text-ink-1 break-all">{sel.branch_name || '—'}</dd>
-                        </dl>
-                        <div className="mt-3 flex gap-2 flex-wrap">
-                          <a
-                            href={`vscode://vscode-remote/ssh-remote+${cfg.remoteHost}${sel.worktree_path}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md ring-1 ring-border hover:bg-bg t-small text-ink-2"
-                          >
-                            <ExternalLink className="h-3.5 w-3.5" /> Open in VSCode
-                          </a>
-                          <a
-                            href={`cursor://ssh-remote+${cfg.remoteHost}${sel.worktree_path}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md ring-1 ring-border hover:bg-bg t-small text-ink-2"
-                          >
-                            <ExternalLink className="h-3.5 w-3.5" /> Open in Cursor
-                          </a>
-                          <Btn variant="outline" size="sm" onClick={() => viewDiff(sel.id)}>
-                            View Diff
-                          </Btn>
-                        </div>
-                      </Section>
-                    )}
                     {diff && (
                       <Section
                         title="Diff"
