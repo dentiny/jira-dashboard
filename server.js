@@ -790,17 +790,23 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
 
     if (dirHere && tracked) {
       // Worktree already set up
-    } else if (dirHere && !tracked) {
-      fs.rmSync(worktreePath, { recursive: true, force: true });
-      try { runGit(`branch -D ${branchName}`); } catch {}
-      runGit(`checkout -b ${branchName}`);
-      runGit(`checkout ${config.branchDefault}`);
-      runGit(`worktree add ${worktreePath} ${branchName}`);
     } else {
+      // Clean up any orphan directory (left over from a crashed previous run)
+      // so `git worktree add` can create a fresh linked worktree.
+      if (dirHere) fs.rmSync(worktreePath, { recursive: true, force: true });
+
+      // Drop any stale branch from a previous attempt. `git branch -D` works
+      // even if the branch is checked out elsewhere (e.g. in the orphan
+      // we just removed).
       try { runGit(`branch -D ${branchName}`); } catch {}
-      runGit(`checkout -b ${branchName}`);
-      runGit(`checkout ${config.branchDefault}`);
-      runGit(`worktree add ${worktreePath} ${branchName}`);
+
+      // Create the worktree with a fresh branch off the default branch in a
+      // single command. Crucially, this NEVER touches the main checkout's
+      // working tree — no `git checkout`, no clobbering of the user's
+      // uncommitted local changes. `git worktree add -b` is a metadata
+      // operation: it writes a new branch ref and a new worktree directory,
+      // leaves projectDir alone.
+      runGit(`worktree add -b ${branchName} ${worktreePath} ${config.branchDefault}`);
     }
 
     db.updateTicket(ticket.id, { worktree_path: worktreePath, branch_name: branchName });
@@ -1231,42 +1237,37 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
       try {
         runGit(`rebase ${config.branchDefault}`, ticket.worktree_path);
         commitSha = runGit(`rev-parse HEAD`, ticket.worktree_path);
-        runGit(`checkout ${config.branchDefault}`);
+        // Move the default-branch ref to the rebased commit via plumbing.
+        // `git update-ref` is a metadata operation: it rewrites the branch
+        // pointer without touching the main checkout's working tree — no
+        // checkout, no merge, no risk of clobbering the user's uncommitted
+        // local changes. If those changes ever need to be reconciled with
+        // the new branch state, that's a regular git reset/merge the user
+        // can do in their own time.
+        runGit(`update-ref refs/heads/${config.branchDefault} ${commitSha}`);
       } catch (err) {
         db.logActivity(ticket.id, 'rebase_failed', err.message);
         try { runGit(`rebase --abort`, ticket.worktree_path); } catch {}
-        try { runGit(`checkout ${config.branchDefault}`); } catch {}
-      }
-
-      try {
-        runGit(`cherry-pick ${commitSha}`);
-      } catch (err) {
+        // Report rebase conflicts directly from the worktree (no main-checkout
+        // involvement). The user can resolve them in their worktree.
         let conflictFiles = [];
         let gitStatus = '';
         try {
-          conflictFiles = runGit(`diff --name-only --diff-filter=U`)
+          conflictFiles = runGit(`diff --name-only --diff-filter=U`, ticket.worktree_path)
             .split('\n').map(s => s.trim()).filter(Boolean);
-          gitStatus = runGit(`status --short`);
+          gitStatus = runGit(`status --short`, ticket.worktree_path);
         } catch {}
-        try { runGit(`cherry-pick --abort`); } catch {}
         const errorDetail = err.message ? err.message.slice(0, 300) : '';
         const fileList = conflictFiles.length > 0
-          ? '\nConflicting files:\n' + conflictFiles.map(f => '  • ' + f).join('\n')
+          ? '\nConflicting files (in worktree):\n' + conflictFiles.map(f => '  • ' + f).join('\n')
           : '';
-        const gitHint = conflictFiles.length === 0
+        const gitHint = conflictFiles.length === 0 && errorDetail
           ? `\nGit error: ${errorDetail}`
           : '';
-        const detail = `Cherry-pick failed on ${ticket.branch_name}. ` +
-          `Reason: the rebase squashes all ticket commits into one, ` +
-          `whose combined diff can conflict with ${config.branchDefault} even if each individual commit rebased cleanly.` +
-          fileList + gitHint;
-        db.logActivity(ticket.id, 'cherry_pick_conflict', detail);
-        res.status(409).json({
-          error: `Cherry-pick failed against ${config.branchDefault}.` +
-            fileList + gitHint,
+        return res.status(409).json({
+          error: `Rebase failed against ${config.branchDefault}.${fileList}${gitHint}\nResolve in worktree ${ticket.worktree_path}, then retry.`,
           ticket: db.getTicket(ticket.id)
         });
-        return;
       }
       db.logActivity(ticket.id, 'cherry_picked', commitSha);
     }
