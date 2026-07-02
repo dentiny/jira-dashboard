@@ -115,6 +115,13 @@ fi
 # Sanitize so the numeric test below is safe under `set -e`.
 case "${NUM_WORKTREES:-0}" in ''|*[!0-9]*) NUM_WORKTREES=0;; esac
 
+# Copy the JSON schemas the coder is told to read during the clarify and
+# conflict-resolution stages into the project's .jira-dashboard/. Always
+# refresh (cp -f) so schema updates in the dashboard repo propagate on
+# re-install. Prompts reference them at ${PROJECT_DIR}/.jira-dashboard/.
+cp -f "${ROOT}/clarification.schema.json" "${ROOT}/resolve-conflict.schema.json" "${ENV_DIR}/"
+ok "Installed coder schemas into ${ENV_DIR}"
+
 # ── Step 1b: Worktree pool (idempotent) ────────────────────
 if [ "$NUM_WORKTREES" -gt 0 ]; then
   step "Worktree pool"

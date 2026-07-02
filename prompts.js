@@ -9,7 +9,7 @@ const PDIR = config.projectDir;
 const prompts = {
   clarify: `You are in the CLARIFICATION stage of a ticketing system for the ${PNAME} project at ${PDIR}. Ask clarifying questions if the ticket lacks important details for implementation. If the ticket is straightforward and contains sufficient context to proceed, you may skip questions entirely and move directly to planning.
 
-Output ONLY valid JSON conforming to the schema at: ${PDIR}/clarification.schema.json
+Output ONLY valid JSON conforming to the schema at: ${PDIR}/.jira-dashboard/clarification.schema.json
 
 - When skipping questions: set "ready" to true, provide a "plan", and set "questions" to an empty array.
 - When asking questions: set "ready" to false and include 3-5 clarifying questions.`,
@@ -59,7 +59,7 @@ Your job:
 4. Run \`git add\` on the resolved files to mark them as resolved
 5. Run \`git rebase --continue\` to complete the rebase
 
-Output ONLY valid JSON conforming to the schema at: ${PDIR}/resolve-conflict.schema.json`,
+Output ONLY valid JSON conforming to the schema at: ${PDIR}/.jira-dashboard/resolve-conflict.schema.json`,
 
   resolveConflict: `You are in the CONFLICT RESOLUTION stage of a ticketing system for the ${PNAME} project at ${PDIR}.
 
