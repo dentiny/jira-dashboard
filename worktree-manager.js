@@ -152,6 +152,15 @@ function acquire(ticket) {
   return { worktreePath, branchName };
 }
 
+// Resolve the freshest base ref to rebase/branch a ticket against, refreshing
+// from the remote first. Thin wrapper over pool.freshDefaultBase that supplies
+// the configured default branch, so server.js gets the current origin tip
+// (e.g. origin/develop) without reaching into the pool or repeating the
+// fetch/fallback logic. See worktree-pool.freshDefaultBase for the rationale.
+function freshDefaultBase(cwd) {
+  return pool.freshDefaultBase({ cwd, branchDefault: config.branchDefault });
+}
+
 // Detach a ticket from its worktree when it closes or is deleted. Pooled slots
 // are reset and returned to the pool (never removed); per-ticket worktrees are
 // removed along with their branch. Idempotent and best-effort.
@@ -187,6 +196,7 @@ module.exports = {
   PoolFullError,
   acquire,
   release,
+  freshDefaultBase,
   isValidWorktree,
   isPoolWorktree,
 };

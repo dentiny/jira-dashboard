@@ -38,15 +38,15 @@ function git(args, cwd, timeout = DEFAULT_TIMEOUT) {
   }).trim();
 }
 
-// Resolve the freshest base ref to branch a ticket off, refreshing from the
-// remote first. Pool worktrees are long-lived and nothing else fetches, so the
-// LOCAL default-branch ref (e.g. `develop`) drifts behind origin — observed ~2
-// weeks stale on a busy monorepo — and every ticket would start off an ancient
-// base. We fetch the default branch from `remote` (best-effort) and prefer the
-// updated `<remote>/<branchDefault>` remote-tracking ref; if there is no remote
-// (offline / local-only repo) or the fetch fails, we fall back to the local
-// ref so those setups still work. Returns a ref name suitable for `checkout -B`
-// / `worktree add`.
+// Resolve the freshest base ref to branch/rebase a ticket off, refreshing from
+// the remote first. Pool worktrees are long-lived and nothing else fetches, so
+// the LOCAL default-branch ref (e.g. `develop`) drifts behind origin — observed
+// ~2 weeks stale on a busy monorepo — and every ticket would start off (or
+// rebase onto) an ancient base. We fetch the default branch from `remote`
+// (best-effort) and prefer the updated `<remote>/<branchDefault>` remote-
+// tracking ref; if there is no remote (offline / local-only repo) or the fetch
+// fails, we fall back to the local ref so those setups still work. Returns a ref
+// name suitable for `checkout -B` / `worktree add` / `rebase`.
 function freshDefaultBase({ cwd, branchDefault, remote = 'origin' }) {
   const remoteRef = `${remote}/${branchDefault}`;
   try {

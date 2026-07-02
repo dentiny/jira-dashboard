@@ -141,4 +141,38 @@ function unloadManager() {
   }
 })();
 
+// ── freshDefaultBase resolves the CURRENT origin tip, not the stale local ref.
+//    This is the base the standalone "rebase" button rebases onto, so a ticket
+//    rebases against latest origin/<default> rather than a drifted local ref. ──
+(function testFreshDefaultBaseResolvesOriginTip() {
+  const origin = makeRepo(); // acts as the remote
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'jd-mgr-clone-'));
+  try {
+    sh(`git clone -q ${origin} ${clone}`, os.tmpdir());
+    sh('git config user.email test@test.local', clone);
+    sh('git config user.name test', clone);
+    sh('git config commit.gpgsign false', clone);
+
+    const { manager } = loadManager({ numWorktrees: 0, projectDir: clone });
+
+    // Upstream advances after the clone — local main is now stale.
+    fs.writeFileSync(path.join(origin, 'upstream.txt'), 'new upstream work\n');
+    sh('git add upstream.txt', origin);
+    sh('git commit -q -m "upstream advances"', origin);
+    const originTip = sh('git rev-parse main', origin);
+    const staleLocalTip = sh('git rev-parse main', clone);
+    assert.notStrictEqual(originTip, staleLocalTip, 'precondition: local main is behind origin/main');
+
+    const base = manager.freshDefaultBase(clone);
+    assert.strictEqual(base, 'origin/main', 'resolves the remote-tracking ref after fetching');
+    assert.strictEqual(sh(`git rev-parse ${base}`, clone), originTip, 'base points at the fresh origin tip');
+
+    console.log('PASS: freshDefaultBase resolves the fresh origin tip for rebase');
+  } finally {
+    unloadManager();
+    cleanupRepo(origin);
+    cleanupRepo(clone);
+  }
+})();
+
 console.log('\n✅ All worktree-manager tests passed\n');
