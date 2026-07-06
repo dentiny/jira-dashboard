@@ -535,9 +535,9 @@ function ResourceMetrics({
   const memPct = Math.min((mem / (peakMem || 1)) * 100, 100)
   // Baseline (oldest entry) for per-stage delta
   const base = r.length > 1 ? p(r[r.length - 1].detail) : null
-  const deltaTokensIn = parseToken(cur?.tokens_in) - parseToken(base?.tokens_in)
-  const deltaTokensOut = parseToken(cur?.tokens_out) - parseToken(base?.tokens_out)
-  const deltaCost = parseCost(cur?.cost) - parseCost(base?.cost)
+  const deltaTokensIn = Math.max(0, parseToken(cur?.tokens_in) - parseToken(base?.tokens_in))
+  const deltaTokensOut = Math.max(0, parseToken(cur?.tokens_out) - parseToken(base?.tokens_out))
+  const deltaCost = Math.max(0, parseCost(cur?.cost) - parseCost(base?.cost))
 
   const renderBucket = (label: string, s: S | null) => {
     if (!s || s.cpu === 0) return null

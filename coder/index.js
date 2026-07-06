@@ -97,7 +97,7 @@ function run(prompt, opts = {}) {
       let tokensStr = '';
       try {
         const s = resolveBackend().stats();
-        if (s.input) tokensStr = ` tokens_in=${s.input} tokens_out=${s.output} cost=$${s.cost || ''}`;
+        if (parseInt(s.input) > 0) tokensStr = ` tokens_in=${s.input} tokens_out=${s.output} cost=$${s.cost || ''}`;
       } catch {}
       onProgress(`[resource] cpu=${data.cpuSec}s mem=${data.memMB}MB threads=${data.threads} elapsed=${data.elapsed}s ncores=${data.ncores}${tokensStr}`);
     });
