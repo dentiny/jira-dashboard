@@ -72,20 +72,20 @@ function unloadManager() {
 }
 
 // ── Per-ticket mode (numWorktrees = 0): create on acquire, remove on release ──
-(function testPerTicketMode() {
+(async function testPerTicketMode() {
   const repo = makeRepo();
   try {
     const { manager, tickets } = loadManager({ numWorktrees: 0, projectDir: repo });
     tickets['abc'] = { id: 'abc', worktree_path: null, branch_name: null };
 
-    const { worktreePath, branchName } = manager.acquire({ id: 'abc', worktree_path: null, branch_name: null });
+    const { worktreePath, branchName } = await manager.acquire({ id: 'abc', worktree_path: null, branch_name: null });
     assert.strictEqual(branchName, 'feature/abc', 'branch name derived from ticket id');
     assert.strictEqual(worktreePath, path.join(repo, '.worktrees', 'abc'), 'per-ticket worktree path');
     assert.ok(realPool.isValidWorktree(worktreePath), 'worktree created');
     assert.strictEqual(sh('git rev-parse --abbrev-ref HEAD', worktreePath), 'feature/abc', 'on feature branch');
     assert.strictEqual(tickets['abc'].worktree_path, worktreePath, 'db records worktree path');
 
-    manager.release('abc');
+    await manager.release('abc');
     assert.ok(!fs.existsSync(worktreePath), 'per-ticket worktree removed on release');
     assert.strictEqual(tickets['abc'].worktree_path, null, 'db worktree path cleared');
     assert.strictEqual(sh('git branch --list feature/abc', repo), '', 'feature branch deleted');
@@ -98,7 +98,7 @@ function unloadManager() {
 })();
 
 // ── Pooled mode (numWorktrees > 0): reuse slots, cap parallelism, recycle ──
-(function testPooledMode() {
+(async function testPooledMode() {
   const repo = makeRepo();
   try {
     const worktreesDir = path.join(repo, '.worktrees');
@@ -109,29 +109,29 @@ function unloadManager() {
     tickets['t2'] = { id: 't2', worktree_path: null, branch_name: null };
     tickets['t3'] = { id: 't3', worktree_path: null, branch_name: null };
 
-    const a1 = manager.acquire(tickets['t1']);
-    const a2 = manager.acquire(tickets['t2']);
+    const a1 = await manager.acquire(tickets['t1']);
+    const a2 = await manager.acquire(tickets['t2']);
     assert.ok(realPool.isPoolWorktree(worktreesDir, a1.worktreePath), 't1 got a pool slot');
     assert.ok(realPool.isPoolWorktree(worktreesDir, a2.worktreePath), 't2 got a pool slot');
     assert.notStrictEqual(a1.worktreePath, a2.worktreePath, 'distinct slots for distinct tickets');
 
     // Pool is now full → third ticket throws PoolFullError.
     let threw = null;
-    try { manager.acquire(tickets['t3']); } catch (e) { threw = e; }
+    try { await manager.acquire(tickets['t3']); } catch (e) { threw = e; }
     assert.ok(threw && threw.code === 'POOL_FULL', 'full pool raises PoolFullError');
 
     // Re-acquiring t1 reuses its existing slot (no new slot consumed).
-    const a1again = manager.acquire(tickets['t1']);
+    const a1again = await manager.acquire(tickets['t1']);
     assert.strictEqual(a1again.worktreePath, a1.worktreePath, 're-acquire reuses the same slot');
 
     // Release t1 → slot returns to the pool (dir preserved, detached, clean).
-    manager.release('t1');
+    await manager.release('t1');
     assert.ok(fs.existsSync(a1.worktreePath), 'released pool slot dir is preserved');
     assert.strictEqual(sh('git rev-parse --abbrev-ref HEAD', a1.worktreePath), 'HEAD', 'slot back on detached HEAD');
     assert.strictEqual(tickets['t1'].worktree_path, null, 'db cleared for released ticket');
 
     // Now t3 can acquire the freed slot.
-    const a3 = manager.acquire(tickets['t3']);
+    const a3 = await manager.acquire(tickets['t3']);
     assert.strictEqual(a3.worktreePath, a1.worktreePath, 't3 reuses the slot t1 freed');
 
     console.log('PASS: pooled mode reuses slots, caps parallelism, and recycles on release');
@@ -144,7 +144,7 @@ function unloadManager() {
 // ── freshDefaultBase resolves the CURRENT origin tip, not the stale local ref.
 //    This is the base the standalone "rebase" button rebases onto, so a ticket
 //    rebases against latest origin/<default> rather than a drifted local ref. ──
-(function testFreshDefaultBaseResolvesOriginTip() {
+(async function testFreshDefaultBaseResolvesOriginTip() {
   const origin = makeRepo(); // acts as the remote
   const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'jd-mgr-clone-'));
   try {
@@ -163,7 +163,7 @@ function unloadManager() {
     const staleLocalTip = sh('git rev-parse main', clone);
     assert.notStrictEqual(originTip, staleLocalTip, 'precondition: local main is behind origin/main');
 
-    const base = manager.freshDefaultBase(clone);
+    const base = await manager.freshDefaultBase(clone);
     assert.strictEqual(base, 'origin/main', 'resolves the remote-tracking ref after fetching');
     assert.strictEqual(sh(`git rev-parse ${base}`, clone), originTip, 'base points at the fresh origin tip');
 

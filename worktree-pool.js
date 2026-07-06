@@ -16,7 +16,7 @@
 //     branch, and deletes the feature branch — the directory is reused, never
 //     removed.
 
-const { execSync } = require('child_process');
+const { execSync, exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -38,6 +38,19 @@ function git(args, cwd, timeout = DEFAULT_TIMEOUT) {
   }).trim();
 }
 
+function execAsync(command, cwd, timeout) {
+  return new Promise((resolve, reject) => {
+    exec(command, { cwd, timeout, maxBuffer: MAX_BUFFER }, (err, stdout, stderr) => {
+      if (err) reject(new Error(stderr.trim() || err.message));
+      else resolve(stdout.trim());
+    });
+  });
+}
+
+function gitAsync(args, cwd, timeout) {
+  return execAsync(`git ${args}`, cwd, timeout);
+}
+
 // Resolve the freshest base ref to branch/rebase a ticket off, refreshing from
 // the remote first. Pool worktrees are long-lived and nothing else fetches, so
 // the LOCAL default-branch ref (e.g. `develop`) drifts behind origin — observed
@@ -47,12 +60,13 @@ function git(args, cwd, timeout = DEFAULT_TIMEOUT) {
 // tracking ref; if there is no remote (offline / local-only repo) or the fetch
 // fails, we fall back to the local ref so those setups still work. Returns a ref
 // name suitable for `checkout -B` / `worktree add` / `rebase`.
-function freshDefaultBase({ cwd, branchDefault, remote = 'origin' }) {
+// The fetch runs asynchronously so the event loop stays responsive on large repos.
+async function freshDefaultBase({ cwd, branchDefault, remote = 'origin' }) {
   const remoteRef = `${remote}/${branchDefault}`;
   try {
     // A single-branch fetch updates the <remote>/<branch> tracking ref on a
     // standard clone; keep it scoped so we don't pull every branch of a monorepo.
-    git(`fetch ${remote} ${branchDefault}`, cwd, FETCH_TIMEOUT);
+    await gitAsync(`fetch ${remote} ${branchDefault}`, cwd, FETCH_TIMEOUT);
   } catch { /* offline or no such remote — fall back to the local ref below */ }
   try {
     git(`rev-parse --verify --quiet ${remoteRef}^{commit}`, cwd);
@@ -126,7 +140,8 @@ function provisionPool({ projectDir, worktreesDir, branchDefault, count }) {
 
 // Reset a pool worktree to a clean checkout of a fresh feature branch, ready
 // for a ticket. Assumes the slot is a valid (idle, detached) pool worktree.
-function acquireSlot({ worktreePath, branchDefault, branchName, remote = 'origin' }) {
+// Async so the event loop stays responsive during fetch + checkout on large repos.
+async function acquireSlot({ worktreePath, branchDefault, branchName, remote = 'origin' }) {
   try { git('rebase --abort 2>/dev/null', worktreePath); } catch { /* no rebase in progress */ }
   git('reset --hard', worktreePath);
   git('clean -fd', worktreePath);
@@ -137,20 +152,21 @@ function acquireSlot({ worktreePath, branchDefault, branchName, remote = 'origin
   // be far ahead — the checkout then rewrites the whole working tree, which on a
   // large monorepo is as costly as the initial `worktree add`, so it gets the
   // longer ADD_TIMEOUT rather than the 5-min default.
-  const base = freshDefaultBase({ cwd: worktreePath, branchDefault, remote });
-  git(`checkout -B ${branchName} ${base}`, worktreePath, ADD_TIMEOUT);
+  const base = await freshDefaultBase({ cwd: worktreePath, branchDefault, remote });
+  await gitAsync(`checkout -B ${branchName} ${base}`, worktreePath, ADD_TIMEOUT);
 }
 
 // Return a pool worktree to its idle state: clean, detached at the default
 // branch, feature branch deleted. The directory itself is preserved for reuse.
-function releaseSlot({ worktreePath, branchDefault, branchName }) {
+// Async so the event loop stays responsive during checkout on large repos.
+async function releaseSlot({ worktreePath, branchDefault, branchName }) {
   if (!isValidWorktree(worktreePath)) return;
   try { git('rebase --abort 2>/dev/null', worktreePath); } catch { /* no rebase in progress */ }
   try { git('reset --hard', worktreePath); } catch { /* best-effort */ }
   try { git('clean -fd', worktreePath); } catch { /* best-effort */ }
   // Detach first so the feature branch is no longer checked out and can be
   // deleted from within this same worktree.
-  try { git(`checkout --detach ${branchDefault}`, worktreePath); } catch { /* best-effort */ }
+  try { await gitAsync(`checkout --detach ${branchDefault}`, worktreePath); } catch { /* best-effort */ }
   if (branchName) {
     try { git(`branch -D ${branchName}`, worktreePath); } catch { /* branch already gone */ }
   }

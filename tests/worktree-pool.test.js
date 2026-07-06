@@ -97,7 +97,7 @@ function linkedWorktrees(repo) {
 })();
 
 // ── acquireSlot checks out a feature branch; releaseSlot returns to idle ──
-(function testAcquireAndRelease() {
+(async function testAcquireAndRelease() {
   const repo = makeRepo();
   const worktreesDir = path.join(repo, '.worktrees');
   try {
@@ -106,7 +106,7 @@ function linkedWorktrees(repo) {
     const branchName = 'feature/my-ticket-abc';
 
     // Acquire: worktree ends up on the fresh feature branch, clean.
-    pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName });
+    await pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName });
     assert.strictEqual(sh('git rev-parse --abbrev-ref HEAD', wt), branchName,
       'acquired slot is on the feature branch');
     assert.strictEqual(sh('git status --porcelain', wt), '', 'acquired slot is clean');
@@ -121,7 +121,7 @@ function linkedWorktrees(repo) {
     fs.writeFileSync(path.join(wt, 'scratch.txt'), 'junk\n');
 
     // Release: back to detached main, feature branch gone, tree pristine.
-    pool.releaseSlot({ worktreePath: wt, branchDefault: 'main', branchName });
+    await pool.releaseSlot({ worktreePath: wt, branchDefault: 'main', branchName });
     assert.strictEqual(sh('git rev-parse --abbrev-ref HEAD', wt), 'HEAD',
       'released slot is back on detached HEAD');
     assert.strictEqual(sh('git rev-parse HEAD', wt), sh('git rev-parse main', repo),
@@ -133,7 +133,7 @@ function linkedWorktrees(repo) {
     assert.strictEqual(branches, '', 'feature branch deleted on release');
 
     // The slot is reusable: acquiring again for a different ticket works.
-    pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName: 'feature/next-ticket' });
+    await pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName: 'feature/next-ticket' });
     assert.strictEqual(sh('git rev-parse --abbrev-ref HEAD', wt), 'feature/next-ticket',
       'slot is reusable for the next ticket');
 
@@ -158,7 +158,7 @@ function linkedWorktrees(repo) {
 //    stale local default-branch ref. Pool worktrees never fetch on their own,
 //    so the local `main`/`develop` ref drifts behind origin; a new ticket must
 //    still start from the current upstream tip (freshDefaultBase). ──
-(function testAcquireSlotUsesFreshOriginBase() {
+(async function testAcquireSlotUsesFreshOriginBase() {
   const origin = makeRepo(); // acts as the remote
   const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'jd-pool-clone-'));
   try {
@@ -182,7 +182,7 @@ function linkedWorktrees(repo) {
 
     // Acquire: freshDefaultBase should fetch and branch off origin/main's tip.
     const wt = path.join(worktreesDir, 'pool-0');
-    pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName: 'feature/fresh' });
+    await pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName: 'feature/fresh' });
 
     const branchBase = sh('git rev-parse HEAD', wt);
     assert.strictEqual(branchBase, originTip,
@@ -199,10 +199,10 @@ function linkedWorktrees(repo) {
 
 // ── freshDefaultBase falls back to the local ref when there is no remote,
 //    so offline / local-only repos keep working. ──
-(function testFreshDefaultBaseFallsBackWithoutRemote() {
+(async function testFreshDefaultBaseFallsBackWithoutRemote() {
   const repo = makeRepo(); // plain repo, no remote configured
   try {
-    const base = pool.freshDefaultBase({ cwd: repo, branchDefault: 'main' });
+    const base = await pool.freshDefaultBase({ cwd: repo, branchDefault: 'main' });
     assert.strictEqual(base, 'main',
       'with no remote, freshDefaultBase returns the local branch name');
     // And it still resolves to a real commit.

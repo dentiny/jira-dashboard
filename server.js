@@ -133,7 +133,7 @@ async function pushAndOpenPr(ticketId, branchName, title, worktreePath) {
 
     if (ticketGone(ticketId)) return;
     db.updateTicket(ticketId, { stage: 'done', status: 'idle', pr_url: prUrl });
-    worktrees.release(ticketId);
+    await worktrees.release(ticketId);
   } catch (err) {
     if (ticketGone(ticketId)) return;
     db.logActivity(
@@ -493,7 +493,7 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
     // free slot; a full pool surfaces as a clean 409 rather than an
     // implementation failure.
     try {
-      ({ worktreePath, branchName } = worktrees.acquire(ticket));
+      ({ worktreePath, branchName } = await worktrees.acquire(ticket));
     } catch (err) {
       if (err.code === 'POOL_FULL') {
         db.updateTicketField(ticket.id, 'status', 'idle');
@@ -661,7 +661,7 @@ app.post('/api/tickets/:id/rebase', async (req, res) => {
     // default-branch ref drifts behind origin; freshDefaultBase fetches and
     // resolves origin/<default> (falling back to the local ref when there's no
     // remote). This mirrors how new worktrees are based off the fresh tip.
-    const rebaseBase = worktrees.freshDefaultBase(ticket.worktree_path);
+    const rebaseBase = await worktrees.freshDefaultBase(ticket.worktree_path);
 
     // Attempt the rebase
     try {
@@ -905,7 +905,7 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
     }
 
     db.updateTicket(ticket.id, { stage: 'done', commit_sha: commitSha });
-    worktrees.release(ticket.id);
+    await worktrees.release(ticket.id);
 
     res.json({ success: true, commit_sha: commitSha, ticket: db.getTicket(ticket.id) });
   } catch (err) {
@@ -922,7 +922,7 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
 // running. Kills the active coder process (if any), releases the worktree /
 // pool slot and branch, then moves the ticket to the terminal 'done' stage.
 // An already-closed ticket cannot be closed again.
-app.post('/api/tickets/:id/close', (req, res) => {
+app.post('/api/tickets/:id/close', async (req, res) => {
   const ticket = db.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
   if (ticket.stage === 'done') {
@@ -938,7 +938,7 @@ app.post('/api/tickets/:id/close', (req, res) => {
   db.updateTicket(ticket.id, { stage: 'done', status: 'idle', commit_sha: null, pr_url: null });
 
   // 3. Release the worktree / pool slot and branch (safe when there is none).
-  worktrees.release(ticket.id);
+  await worktrees.release(ticket.id);
 
   db.logActivity(ticket.id, 'closed', killed ? 'closed (running process killed)' : 'closed');
   const updated = db.getTicket(ticket.id);
@@ -947,7 +947,7 @@ app.post('/api/tickets/:id/close', (req, res) => {
 });
 
 // ── Delete ticket ─────────────────────────────────────────
-app.delete('/api/tickets/:id', (req, res) => {
+app.delete('/api/tickets/:id', async (req, res) => {
   const ticket = db.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
 
@@ -956,7 +956,7 @@ app.delete('/api/tickets/:id', (req, res) => {
   killTicketProcess(ticket.id);
 
   // Return a pooled slot to the pool, or remove a per-ticket worktree.
-  worktrees.release(ticket.id);
+  await worktrees.release(ticket.id);
 
   db.deleteTicket(req.params.id);
   res.json({ success: true });
@@ -1152,7 +1152,7 @@ app.post('/api/suggestions/:id/dismiss', (req, res) => {
 });
 
 // ── Start ──────────────────────────────────────────────────
-(function recoverStuckTickets() {
+(async function recoverStuckTickets() {
   const ids = db.getTicketIds();
   let changed = false;
   for (const tid of ids) {
@@ -1194,7 +1194,7 @@ app.post('/api/suggestions/:id/dismiss', (req, res) => {
           } catch {}
         }
         db.updateTicket(tid, { stage: 'done', status: 'idle' });
-        worktrees.release(tid);
+        await worktrees.release(tid);
         db.logActivity(tid, 'recovered', 'Server restarted after branch push — finalized to done (branch already on origin).');
         changed = true;
         console.log(`Recovered: ${tid} finalized to done (push completed before restart)`);

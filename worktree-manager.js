@@ -78,7 +78,7 @@ function ensureWorktreesDir() {
 
 // Claim a free pool slot for a ticket and check out its feature branch.
 // Returns { worktreePath, branchName } or null when every slot is in use.
-function acquirePoolSlot(ticket, branchName) {
+async function acquirePoolSlot(ticket, branchName) {
   const claimed = new Set(
     db.getAllTickets()
       .filter((t) => t.id !== ticket.id && t.worktree_path && t.stage !== 'done')
@@ -88,7 +88,7 @@ function acquirePoolSlot(ticket, branchName) {
     if (claimed.has(path.resolve(wt))) continue;   // held by another ticket
     if (!pool.isValidWorktree(wt)) continue;        // not provisioned — skip
     try {
-      pool.acquireSlot({ worktreePath: wt, branchDefault: config.branchDefault, branchName });
+      await pool.acquireSlot({ worktreePath: wt, branchDefault: config.branchDefault, branchName });
     } catch (e) {
       db.logActivity(ticket.id, 'worktree_acquire_warn',
         `slot ${wt} failed to prep: ${e.message.slice(0, 120)}`);
@@ -102,7 +102,7 @@ function acquirePoolSlot(ticket, branchName) {
 // Set up (or reuse) a worktree for a ticket and record it on the ticket row.
 // Returns { worktreePath, branchName }. Throws PoolFullError in pooled mode
 // when no slot is free.
-function acquire(ticket) {
+async function acquire(ticket) {
   ensureWorktreesDir();
   const branchName = branchNameFor(ticket.id);
   let worktreePath;
@@ -114,7 +114,7 @@ function acquire(ticket) {
     if (pool.isValidWorktree(ticket.worktree_path) && ticket.branch_name) {
       worktreePath = ticket.worktree_path;
     } else {
-      const slot = acquirePoolSlot(ticket, branchName);
+      const slot = await acquirePoolSlot(ticket, branchName);
       if (!slot) throw new PoolFullError(config.numWorktrees);
       worktreePath = slot.worktreePath;
       db.logActivity(ticket.id, 'worktree_acquired', worktreePath);
@@ -142,7 +142,7 @@ function acquire(ticket) {
       // metadata operation that writes a new branch ref and worktree dir. Base
       // off the freshly-fetched upstream tip, not the stale local ref, so a new
       // ticket doesn't start weeks behind origin (see pool.freshDefaultBase).
-      const base = pool.freshDefaultBase({ cwd: config.projectDir, branchDefault: config.branchDefault });
+      const base = await pool.freshDefaultBase({ cwd: config.projectDir, branchDefault: config.branchDefault });
       git(`worktree add -b ${branchName} ${worktreePath} ${base}`, undefined, WORKTREE_ADD_TIMEOUT);
     }
   }
@@ -164,14 +164,14 @@ function freshDefaultBase(cwd) {
 // Detach a ticket from its worktree when it closes or is deleted. Pooled slots
 // are reset and returned to the pool (never removed); per-ticket worktrees are
 // removed along with their branch. Idempotent and best-effort.
-function release(ticketId) {
+async function release(ticketId) {
   const t = db.getTicket(ticketId);
   if (!t) return;
   const wt = t.worktree_path;
   const bn = t.branch_name;
 
   if (isPoolMode() && isPoolWorktree(wt)) {
-    pool.releaseSlot({ worktreePath: wt, branchDefault: config.branchDefault, branchName: bn });
+    await pool.releaseSlot({ worktreePath: wt, branchDefault: config.branchDefault, branchName: bn });
     db.updateTicket(ticketId, { worktree_path: null, branch_name: null });
     db.logActivity(ticketId, 'worktree_released', wt || '(none)');
     return;
