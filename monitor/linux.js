@@ -9,7 +9,7 @@ function create(pid, onProgress) {
   let peakMem = 0;
   const startTime = Date.now();
 
-  const interval = setInterval(() => {
+  function poll() {
     try {
       const raw = fs.readFileSync(`/proc/${pid}/stat`, 'utf-8');
       const afterParen = raw.slice(raw.lastIndexOf(')') + 2);
@@ -24,9 +24,11 @@ function create(pid, onProgress) {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       if (onProgress) onProgress({ cpuSec, memMB: memMB.toFixed(1), threads, elapsed, ncores });
     } catch {}
-  }, 3000);
+  }
 
-  return { interval, peakMem: () => peakMem, close: () => clearInterval(interval) };
+  const interval = setInterval(poll, 3000);
+
+  return { poll, peakMem: () => peakMem, close: () => clearInterval(interval) };
 }
 
 module.exports = { create };

@@ -119,9 +119,11 @@ function run(prompt, opts = {}) {
     proc.stderr.on('data', d => { stderr += d.toString(); });
 
     proc.on('close', code => {
-      if (resMonitor) resMonitor.close();
+      // Parse output FIRST so store.setUsage() captures the final
+      // token/cost values before the resource monitor's last poll.
       const raw = stdout.trim();
       const parsed = backend.parseOutput ? backend.parseOutput(raw) : { text: raw, tokens: null, sessionId: null };
+      if (resMonitor) { resMonitor.poll(); resMonitor.close(); }
       if (code === 0) {
         if (!parsed.text && stderr.trim()) {
           reject(new Error(`Coder produced no output: ${stderr.slice(-500)}`));
