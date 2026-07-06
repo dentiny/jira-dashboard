@@ -79,7 +79,7 @@ module.exports = function claudeBackend(config, store) {
             }
             if (evt.type === 'assistant' && evt.message?.usage) {
               const content = evt.message.content || [];
-              text = content.map(c => c.text || '').join('');
+              text += content.map(c => c.text || '').join('');
             }
             if (evt.type === 'result' && evt.subtype === 'success') {
               if (evt.total_cost_usd !== undefined) {
