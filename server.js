@@ -47,7 +47,6 @@ async function generateConflictClarification(ticket, conflictFiles, gitStatus, r
   const prompt = `${prompts.resolveConflict}\n\nRead full ticket context at: ${contextFile}`;
 
   try {
-    db.clearStageActivity(ticket.id, 'clarification');
     db.logActivity(ticket.id, 'conflict_clarify_start');
     db.updateTicketField(ticket.id, 'status', 'running');
     const onProgress = (line) => {
@@ -158,9 +157,9 @@ async function finishImplement(ticketId, worktreePath, runTokens, onProgress) {
 
   const tokens = runTokens || { cost: 0, input: '0', output: '0' };
   db.updateTicket(ticket.id, {
-    token_cost: parseFloat(tokens.cost) || 0,
-    token_input: tokens.input || '0',
-    token_output: tokens.output || '0',
+    token_cost: (parseFloat(ticket.token_cost) || 0) + (parseFloat(tokens.cost) || 0),
+    token_input: String((parseInt(ticket.token_input) || 0) + (parseInt(tokens.input) || 0)),
+    token_output: String((parseInt(ticket.token_output) || 0) + (parseInt(tokens.output) || 0)),
   });
   db.logActivity(ticket.id, 'token_usage', JSON.stringify(tokens));
 
@@ -311,7 +310,6 @@ app.post('/api/tickets/:id/clarify', async (req, res) => {
   const prompt = `${prompts.clarify}\n\nRead full ticket context at: ${contextFile}`;
 
   try {
-    db.clearStageActivity(ticket.id, 'clarification');
     db.logActivity(ticket.id, 'clarify_start');
     db.updateTicketField(ticket.id, 'status', 'running');
     const onProgress = (line) => {
@@ -409,7 +407,6 @@ app.post('/api/tickets/:id/answer', async (req, res) => {
   const prompt = `${prompts.evaluate}\n\nRead full ticket context at: ${contextFile}`;
 
   try {
-    db.clearStageActivity(ticket.id, 'clarification');
     db.logActivity(ticket.id, 'answer_process');
     db.updateTicketField(ticket.id, 'status', 'running');
     const onProgress = (line) => {
@@ -520,7 +517,6 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
 
     const prompt = `${prompts.implement}\n\nRead full ticket context at: ${contextFile}\nWork in: ${worktreePath}`;
 
-    db.clearStageActivity(ticket.id, 'implementation');
     db.logActivity(ticket.id, 'implement_start');
     db.updateTicketField(ticket.id, 'status', 'running');
 

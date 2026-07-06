@@ -353,27 +353,25 @@ function close() {
 }
 
 // ── Stage resource aggregation ────────────────────────────
-// Walks the activity log for a ticket and buckets every
-// `resource` entry into its tagged stage.  Within each stage,
-// the FIRST resource entry is the baseline and the LAST is
-// the final reading for that stage; delta between them is the
-// contribution of that stage.
+// Walks the activity log for a ticket and accumulates per-stage
+// deltas.  Since the same stage may repeat across cycles (e.g.
+// after review feedback), per-stage contributions are computed
+// by summing deltas between CONSECUTIVE resource entries that
+// share the same stage tag — NOT by a single (last - first)
+// across the whole group, which would pull in interleaved costs
+// from other stages.
 //
-// TOKEN/COST: opencode stats are project-wide cumulative.
-// Per-stage we compute (last - first) delta within that stage.
-// For the GRAND TOTAL we compute delta from the very first
-// resource entry across ALL stages to the very last — NOT
-// the sum of per-stage deltas.  This avoids double-counting
-// when opencode reuses the same session across stages.
+// TOKEN/COST: opencode stats are project-wide cumulative, so
+// the grand total uses (last overall - first overall) across ALL
+// entries.  CPU/elapsed are per-process (resets on each coder run),
+// so the grand total sums per-stage buckets.
 //
 // Returns:
 //   {
-//     clarification: { cpu, elapsed, peak_mem, tokens_in, tokens_out, cost, calls },
-//     implementation: { ... },
+//     clarification: { cpu, elapsed, peak_mem, tokens_in, tokens_out, cost, calls } | null,
+//     implementation: { ... } | null,
 //     total: { cpu, elapsed, peak_mem, tokens_in, tokens_out, cost, calls }
 //   }
-// Missing stages come back as null so the UI can render an
-// "n/a" cleanly.
 
 // Token parser helpers
 function _parseToken(s) {
@@ -391,83 +389,69 @@ function _emptyBucket() { return { cpu: 0, elapsed: 0, peak_mem: 0, tokens_in: 0
 function getStageResources(ticketId) {
   const rows = stmts.getActivity.all(ticketId).slice().reverse(); // chronological
   const parseKv = (s) => Object.fromEntries((s || '').split(' ').map(k => k.split('=')));
-  
-  // Collect all resource entries in order
+
   const allRes = rows.filter(r => r.action === 'resource');
-  
-  // Group resource entries by stage
-  const byStage = {};
+
+  const buckets = {};
+  const peakMems = {};
+  let prev = null;
+  let prevStage = null;
+
   for (const r of allRes) {
     const stage = r.stage || 'unknown';
-    if (!(stage in byStage)) byStage[stage] = [];
-    byStage[stage].push(r);
+    if (!buckets[stage]) {
+      buckets[stage] = _emptyBucket();
+      peakMems[stage] = 0;
+    }
+
+    const cp = parseKv(r.detail);
+    peakMems[stage] = Math.max(peakMems[stage], parseFloat(cp.mem) || 0);
+
+    if (prev && stage === prevStage) {
+      const pp = parseKv(prev.detail);
+      buckets[stage].cpu += Math.max(0, (parseFloat(cp.cpu) || 0) - (parseFloat(pp.cpu) || 0));
+      buckets[stage].elapsed += Math.max(0, (parseInt(cp.elapsed) || 0) - (parseInt(pp.elapsed) || 0));
+      buckets[stage].tokens_in += Math.max(0, _parseToken(cp.tokens_in) - _parseToken(pp.tokens_in));
+      buckets[stage].tokens_out += Math.max(0, _parseToken(cp.tokens_out) - _parseToken(pp.tokens_out));
+      buckets[stage].cost += Math.max(0, _parseCost(cp.cost) - _parseCost(pp.cost));
+    }
+
+    if (stage !== prevStage) {
+      buckets[stage].calls++;
+      prevStage = stage;
+    }
+    prev = r;
   }
-  
+
+  // Assign peak memory and build summary
+  for (const stage of Object.keys(buckets)) {
+    buckets[stage].peak_mem = peakMems[stage];
+  }
+
   const summary = { clarification: null, implementation: null, total: _emptyBucket() };
-  
-  // ── Per-stage buckets (deltas within each stage) ──────
-  for (const [stage, entries] of Object.entries(byStage)) {
-    const bucket = _emptyBucket();
-    const first = entries[0];
-    const last = entries[entries.length - 1];
-    const fp = parseKv(first.detail);
-    const lp = parseKv(last.detail);
-    
-    bucket.cpu = Math.max(0, (parseFloat(lp.cpu) || 0) - (parseFloat(fp.cpu) || 0));
-    bucket.elapsed = Math.max(0, (parseInt(lp.elapsed) || 0) - (parseInt(fp.elapsed) || 0));
-    // tokens_in/tokens_out are cumulative — compute delta, not raw value
-    bucket.tokens_in = Math.max(0, _parseToken(lp.tokens_in) - _parseToken(fp.tokens_in));
-    bucket.tokens_out = Math.max(0, _parseToken(lp.tokens_out) - _parseToken(fp.tokens_out));
-    bucket.cost = Math.max(0, _parseCost(lp.cost) - _parseCost(fp.cost));
-    // peak memory: max over all entries in this stage
-    for (const e of entries) {
-      const mem = parseFloat(parseKv(e.detail).mem) || 0;
-      if (mem > bucket.peak_mem) bucket.peak_mem = mem;
-    }
-    bucket.calls = 1;
-    
-    // If multiple distinct opencode calls happened in this stage
-    // (e.g. clarify + answer), the deltas above only capture the
-    // polling window of the LAST call.  Augment from stage_summary.
-    const summaries = rows.filter(r => r.action === 'stage_summary' && (r.stage || 'unknown') === stage);
-    if (summaries.length > 1) {
-      const sum = _emptyBucket();
-      for (const s of summaries) {
-        const sp = parseKv(s.detail);
-        sum.cpu += parseFloat(sp.cpu) || 0;
-        sum.elapsed += parseFloat(sp.elapsed) || 0;
-        // stage_summary entries log cumulative token values —
-        // only sum the cost delta; tokens are cumulative so we can't naively sum.
-        // Keep the resource-based delta for tokens.
-        sum.cost += _parseCost(sp.cost);
-        const m = parseFloat(sp.peak_mem) || 0;
-        if (m > sum.peak_mem) sum.peak_mem = m;
-      }
-      sum.calls = summaries.length;
-      bucket.cpu = sum.cpu;
-      bucket.elapsed = sum.elapsed;
-      bucket.cost = sum.cost;
-      bucket.peak_mem = sum.peak_mem;
-      bucket.calls = sum.calls;
-      // tokens stay as resource-based delta (first→last)
-    }
-    
+  for (const [stage, bucket] of Object.entries(buckets)) {
     if (stage in summary) summary[stage] = bucket;
     else summary[stage] = bucket;
   }
-  
-  // ── Grand total: overall first→last delta across ALL stages ──
-  // NOT the sum of per-stage buckets — opencode reuses the same
-  // session so cumulative stats span both stages.
+
+  // ── Grand total ──────────────────────────────────────
   if (allRes.length > 0) {
     const firstOverall = parseKv(allRes[0].detail);
     const lastOverall = parseKv(allRes[allRes.length - 1].detail);
-    summary.total.cpu = Math.max(0, (parseFloat(lastOverall.cpu) || 0) - (parseFloat(firstOverall.cpu) || 0));
-    summary.total.elapsed = Math.max(0, (parseInt(lastOverall.elapsed) || 0) - (parseInt(firstOverall.elapsed) || 0));
+    // tokens/cost are cumulative (opencode stats) – overall first→last delta
     summary.total.tokens_in = Math.max(0, _parseToken(lastOverall.tokens_in) - _parseToken(firstOverall.tokens_in));
     summary.total.tokens_out = Math.max(0, _parseToken(lastOverall.tokens_out) - _parseToken(firstOverall.tokens_out));
     summary.total.cost = Math.max(0, _parseCost(lastOverall.cost) - _parseCost(firstOverall.cost));
-    // peak memory: max across all stages
+    // CPU/elapsed are per-process – sum per-stage buckets
+    for (const key of Object.keys(summary)) {
+      if (key === 'total') continue;
+      const b = summary[key];
+      if (b) {
+        summary.total.cpu += b.cpu;
+        summary.total.elapsed += b.elapsed;
+      }
+    }
+    // peak memory: max across all entries
     for (const r of allRes) {
       const mem = parseFloat(parseKv(r.detail).mem) || 0;
       if (mem > summary.total.peak_mem) summary.total.peak_mem = mem;
@@ -479,7 +463,7 @@ function getStageResources(ticketId) {
       if (b) summary.total.calls += b.calls;
     }
   }
-  
+
   return summary;
 }
 
