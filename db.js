@@ -440,13 +440,13 @@ function getStageResources(ticketId) {
   }
 
   // ── Grand total ──────────────────────────────────────
-  if (allRes.length > 0) {
-    const firstOverall = parseKv(allRes[0].detail);
-    const lastOverall = parseKv(allRes[allRes.length - 1].detail);
-    // tokens/cost are cumulative (opencode stats) – overall first→last delta
-    summary.total.tokens_in = Math.max(0, _parseToken(lastOverall.tokens_in) - _parseToken(firstOverall.tokens_in));
-    summary.total.tokens_out = Math.max(0, _parseToken(lastOverall.tokens_out) - _parseToken(firstOverall.tokens_out));
-    summary.total.cost = Math.max(0, _parseCost(lastOverall.cost) - _parseCost(firstOverall.cost));
+  // Use the faithful session-level data from the ticket row, not
+  // snapshot diffs (which are only for per-stage breakdown).
+  const ticket = stmts.getTicket.get(ticketId);
+  if (ticket && ticket.token_cost != null) {
+    summary.total.tokens_in = _parseToken(ticket.token_input);
+    summary.total.tokens_out = _parseToken(ticket.token_output);
+    summary.total.cost = parseFloat(ticket.token_cost) || 0;
     // CPU/elapsed are per-process – sum per-stage buckets
     for (const key of Object.keys(summary)) {
       if (key === 'total') continue;
@@ -456,16 +456,18 @@ function getStageResources(ticketId) {
         summary.total.elapsed += b.elapsed;
       }
     }
-    // peak memory: max across all entries
-    for (const r of allRes) {
-      const mem = parseFloat(parseKv(r.detail).mem) || 0;
-      if (mem > summary.total.peak_mem) summary.total.peak_mem = mem;
-    }
-    // calls: sum of per-stage calls
-    for (const key of Object.keys(summary)) {
-      if (key === 'total') continue;
-      const b = summary[key];
-      if (b) summary.total.calls += b.calls;
+    // peak memory: max across all resource entries
+    if (allRes.length > 0) {
+      for (const r of allRes) {
+        const mem = parseFloat(parseKv(r.detail).mem) || 0;
+        if (mem > summary.total.peak_mem) summary.total.peak_mem = mem;
+      }
+      // calls: sum of per-stage calls
+      for (const key of Object.keys(summary)) {
+        if (key === 'total') continue;
+        const b = summary[key];
+        if (b) summary.total.calls += b.calls;
+      }
     }
   }
 
