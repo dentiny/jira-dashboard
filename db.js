@@ -35,6 +35,7 @@ db.exec(`
     token_cost REAL,
     token_input TEXT,
     token_output TEXT,
+    coder_pgid INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -92,6 +93,9 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN pr_url TEXT`); } catch {}
 // Migration: add base_sha column (origin/<default> commit at worktree acquire time)
 try { db.exec(`ALTER TABLE tickets ADD COLUMN base_sha TEXT`); } catch {}
 
+// Migration: add coder_pgid column (process group ID for orphan cleanup)
+try { db.exec(`ALTER TABLE tickets ADD COLUMN coder_pgid INTEGER`); } catch {}
+
 // ── Prepared statements ───────────────────────────────────
 const stmts = {
   // Tickets
@@ -102,11 +106,11 @@ const stmts = {
     INSERT INTO tickets (id, title, content, stage, plan, worktree_path,
       branch_name, commit_sha, pr_url, review_feedback, status, ocode_session,
       total_cpu, total_elapsed, token_cost, token_input, token_output,
-      estimated_complexity, plan_notes, created_at, updated_at)
+      estimated_complexity, plan_notes, coder_pgid, created_at, updated_at)
     VALUES (@id, @title, @content, @stage, @plan, @worktree_path,
       @branch_name, @commit_sha, @pr_url, @review_feedback, @status, @ocode_session,
       @total_cpu, @total_elapsed, @token_cost, @token_input, @token_output,
-      @estimated_complexity, @plan_notes, @created_at, @updated_at)
+      @estimated_complexity, @plan_notes, @coder_pgid, @created_at, @updated_at)
   `),
   updateTicket: db.prepare(`
     UPDATE tickets SET
@@ -118,7 +122,7 @@ const stmts = {
       token_cost = @token_cost, token_input = @token_input,
       token_output = @token_output,
       estimated_complexity = @estimated_complexity,
-      plan_notes = @plan_notes, updated_at = @updated_at
+      plan_notes = @plan_notes, coder_pgid = @coder_pgid, updated_at = @updated_at
     WHERE id = @id
   `),
   updateTicketField: (field) => db.prepare(`
@@ -247,6 +251,7 @@ function createTicket(data) {
     token_output: null,
     estimated_complexity: null,
     plan_notes: null,
+    coder_pgid: null,
   };
   const t = { ...defaults, ...data };
   stmts.insertTicket.run(t);

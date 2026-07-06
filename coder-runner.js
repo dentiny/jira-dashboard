@@ -4,19 +4,29 @@ const db = require('./db');
 
 const runningProcs = new Map();
 
-function killTicketProcess(ticketId) {
+function killTicketProcess(ticketId, pgid) {
+  // Try in-memory map first (normal case, server alive)
   const proc = runningProcs.get(ticketId);
-  if (!proc || proc.pid == null) return false;
-  runningProcs.delete(ticketId);
-  const pid = proc.pid;
-  const signal = (sig) => {
-    try { process.kill(-pid, sig); }
-    catch { try { proc.kill(sig); } catch {} }
-  };
-  signal('SIGTERM');
-  const t = setTimeout(() => signal('SIGKILL'), 2000);
-  if (typeof t.unref === 'function') t.unref();
-  return true;
+  if (proc && proc.pid != null) {
+    runningProcs.delete(ticketId);
+    const pid = proc.pid;
+    const signal = (sig) => {
+      try { process.kill(-pid, sig); }
+      catch { try { proc.kill(sig); } catch {} }
+    };
+    signal('SIGTERM');
+    const t = setTimeout(() => signal('SIGKILL'), 2000);
+    if (typeof t.unref === 'function') t.unref();
+    return true;
+  }
+  // Post-restart: kill orphaned process group by saved PGID
+  if (pgid) {
+    try { process.kill(-pgid, 'SIGTERM'); } catch {}
+    const t = setTimeout(() => { try { process.kill(-pgid, 'SIGKILL'); } catch {} }, 2000);
+    if (typeof t.unref === 'function') t.unref();
+    return true;
+  }
+  return false;
 }
 
 function isClosed(ticketId) {
@@ -37,7 +47,10 @@ async function runCoder(ticketId, prompt, opts = {}) {
       timeout: opts.timeout || config.coder.timeouts.clarify,
       onProgress: opts.onProgress,
       cwd: opts.cwd,
-      onSpawn: (proc) => runningProcs.set(ticketId, proc),
+      onSpawn: (proc) => {
+        runningProcs.set(ticketId, proc);
+        if (proc.pid) db.updateTicketField(ticketId, 'coder_pgid', proc.pid);
+      },
     });
     if (result.sessionId) {
       db.updateTicketField(ticketId, 'ocode_session', result.sessionId);

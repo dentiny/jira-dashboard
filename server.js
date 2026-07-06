@@ -1206,27 +1206,24 @@ app.post('/api/suggestions/:id/dismiss', (req, res) => {
         continue;
       }
 
-      // Tickets running a coder session (clarify, implement, rebase) spawn
-      // the child `detached`, so the process survives a server restart and
-      // the session may still be alive. If it is, re-attach and finish the
-      // implementation; otherwise reset to idle so the user can retry.
-      let alive = false;
-      if (t.ocode_session) {
-        try {
-          const sessions = require('child_process').execSync(
-            `${config.coder.bin} session list`,
-            { encoding: 'utf-8', timeout: config.coder.timeouts.command, stdio: 'pipe' }
-          );
-          alive = sessions.includes(t.ocode_session);
-        } catch {}
-      }
-      if (alive && t.stage === 'implementation') {
-        db.logActivity(tid, 'recovered', `Server restarted — re-attaching to live session ${t.ocode_session}`);
+      // Tickets running a coder session: kill orphaned process (if any)
+      // by saved PGID, then re-attach to the managed session so the coder
+      // picks up where it left off with full conversation context.
+      killTicketProcess(tid, t.coder_pgid);
+      db.updateTicketField(tid, 'coder_pgid', null);
+
+      if (t.ocode_session && t.stage === 'implementation') {
+        db.logActivity(tid, 'recovered', `Server restarted — re-attaching to session ${t.ocode_session}`);
         changed = true;
-        console.log(`Recovered: ${tid} session alive — re-attaching`);
+        console.log(`Recovered: ${tid} re-attaching to session ${t.ocode_session}`);
         (async () => {
           try {
-            const recoveryResult = await runCoder(tid, 'Continue implementing this ticket. The server was restarted but your session survived. Pick up where you left off.', {
+            const prompt = 'The server was restarted while you were implementing this ticket. '
+              + 'Your session is preserved and the worktree has your existing changes. '
+              + 'Review the current state of the worktree and continue implementing where you left off. '
+              + 'Do NOT start over — resume from the current worktree state. '
+              + 'Commit when done.';
+            const recoveryResult = await runCoder(tid, prompt, {
               timeout: config.coder.timeouts.implement,
             });
             if (t.worktree_path && db.getTicket(tid)?.stage !== 'done') {
@@ -1239,9 +1236,9 @@ app.post('/api/suggestions/:id/dismiss', (req, res) => {
           }
         })();
       } else {
-        const reason = alive
-          ? `session alive but stage is ${t.stage} — not resumable`
-          : 'previous coder session gone';
+        const reason = t.ocode_session
+          ? `session exists but stage is ${t.stage} — not resumable`
+          : 'no session to resume';
         db.updateTicketField(tid, 'status', 'idle');
         db.logActivity(tid, 'recovered', `Server restarted — ${reason}, reset to idle`);
         changed = true;
