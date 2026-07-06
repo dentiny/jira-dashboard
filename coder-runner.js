@@ -4,7 +4,7 @@ const db = require('./db');
 
 const runningProcs = new Map();
 
-function killTicketProcess(ticketId, pgid) {
+function killTicketProcess(ticketId, pgid, sessionId) {
   // Try in-memory map first (normal case, server alive)
   const proc = runningProcs.get(ticketId);
   if (proc && proc.pid != null) {
@@ -25,6 +25,21 @@ function killTicketProcess(ticketId, pgid) {
     const t = setTimeout(() => { try { process.kill(-pgid, 'SIGKILL'); } catch {} }, 2000);
     if (typeof t.unref === 'function') t.unref();
     return true;
+  }
+  // Fallback: find and kill orphans by session ID (tickets created before coder_pgid was tracked)
+  if (sessionId) {
+    try {
+      const { execSync } = require('child_process');
+      const pids = execSync(`pgrep -f "${sessionId}"`, { encoding: 'utf-8', timeout: 5000 }).trim().split('\n').filter(Boolean);
+      for (const pid of pids) {
+        const n = parseInt(pid, 10);
+        if (n) {
+          try { process.kill(-n, 'SIGTERM'); } catch {}
+          setTimeout(() => { try { process.kill(-n, 'SIGKILL'); } catch {} }, 2000).unref();
+        }
+      }
+      if (pids.length) return true;
+    } catch {}
   }
   return false;
 }

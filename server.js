@@ -1209,13 +1209,14 @@ app.post('/api/suggestions/:id/dismiss', (req, res) => {
       // Tickets running a coder session: kill orphaned process (if any)
       // by saved PGID, then re-attach to the managed session so the coder
       // picks up where it left off with full conversation context.
-      killTicketProcess(tid, t.coder_pgid);
+      killTicketProcess(tid, t.coder_pgid, t.ocode_session);
       db.updateTicketField(tid, 'coder_pgid', null);
 
       if (t.ocode_session && t.stage === 'implementation') {
         db.logActivity(tid, 'recovered', `Server restarted — re-attaching to session ${t.ocode_session}`);
         changed = true;
         console.log(`Recovered: ${tid} re-attaching to session ${t.ocode_session}`);
+        const recCwd = t.worktree_path || config.projectDir;
         (async () => {
           try {
             const prompt = 'The server was restarted while you were implementing this ticket. '
@@ -1225,6 +1226,15 @@ app.post('/api/suggestions/:id/dismiss', (req, res) => {
               + 'Commit when done.';
             const recoveryResult = await runCoder(tid, prompt, {
               timeout: config.coder.timeouts.implement,
+              cwd: recCwd,
+              onProgress: line => {
+                if (line.startsWith('[resource] ')) {
+                  db.logActivity(tid, 'resource', line.slice(11), 'implementation');
+                  sseBroadcast(tid, 'resource', { detail: line.slice(11) });
+                } else if (line.trim()) {
+                  sseBroadcast(tid, 'stdout', { text: line });
+                }
+              },
             });
             if (t.worktree_path && db.getTicket(tid)?.stage !== 'done') {
               await finishImplement(tid, t.worktree_path, recoveryResult.tokens);
