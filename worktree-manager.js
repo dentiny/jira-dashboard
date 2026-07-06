@@ -87,14 +87,16 @@ async function acquirePoolSlot(ticket, branchName) {
   for (const wt of pool.poolPaths(config.worktreesDir, config.numWorktrees)) {
     if (claimed.has(path.resolve(wt))) continue;   // held by another ticket
     if (!pool.isValidWorktree(wt)) continue;        // not provisioned — skip
+    let baseSha;
     try {
-      await pool.acquireSlot({ worktreePath: wt, branchDefault: config.branchDefault, branchName });
+      ({ baseSha } = await pool.acquireSlot({ worktreePath: wt, branchDefault: config.branchDefault, branchName }));
     } catch (e) {
+      console.log(`[acquirePoolSlot] ${ticket.id} slot ${wt} FAILED: ${e.message.slice(0, 200)}`);
       db.logActivity(ticket.id, 'worktree_acquire_warn',
         `slot ${wt} failed to prep: ${e.message.slice(0, 120)}`);
       continue; // corrupt slot — try the next one
     }
-    return { worktreePath: wt, branchName };
+    return { worktreePath: wt, branchName, baseSha };
   }
   return null;
 }
@@ -113,11 +115,19 @@ async function acquire(ticket) {
     // how many tickets can be in flight at once.
     if (pool.isValidWorktree(ticket.worktree_path) && ticket.branch_name) {
       worktreePath = ticket.worktree_path;
+      console.log(`[acquire] ${ticket.id} reusing existing worktree ${worktreePath} branch=${ticket.branch_name}`);
     } else {
+      console.log(`[acquire] ${ticket.id} acquiring new pool slot...`);
       const slot = await acquirePoolSlot(ticket, branchName);
       if (!slot) throw new PoolFullError(config.numWorktrees);
       worktreePath = slot.worktreePath;
       db.logActivity(ticket.id, 'worktree_acquired', worktreePath);
+      console.log(`[acquire] ${ticket.id} acquired ${worktreePath} base_sha=${slot.baseSha}`);
+      // Persist the base SHA at acquire time so the ready handler can squash
+      // against the exact origin/<default> commit that was used as the branch
+      // point, rather than computing a merge-base against a potentially stale
+      // local ref at PR time.
+      db.updateTicketField(ticket.id, 'base_sha', slot.baseSha);
     }
   } else {
     // Per-ticket mode: one throwaway worktree per ticket, deleted on close.

@@ -140,19 +140,32 @@ function provisionPool({ projectDir, worktreesDir, branchDefault, count }) {
 //   4. verify the worktree is clean — if reset was interrupted, fail fast
 //      rather than letting the coder's `git add -A` sweep in partial state.
 async function acquireSlot({ worktreePath, branchDefault, branchName, remote = 'origin' }) {
-  try { git('rebase --abort 2>/dev/null', worktreePath); } catch { /* no rebase in progress */ }
+  try { git('rebase --abort 2>/dev/null', worktreePath); } catch { }
   const base = freshDefaultBase({ cwd: worktreePath, branchDefault, remote });
-  // Hard-reset rewrites the working tree — can be slow on large repos, so
-  // run it async to keep the event loop responsive.
-  await gitAsync(`reset --hard ${base}`, worktreePath);
+  const before = git('rev-parse --short HEAD', worktreePath);
+  console.log(`[acquireSlot] ${branchName} base=${base} worktree=${worktreePath} HEAD-before=${before}`);
+  try {
+    await gitAsync(`reset --hard ${base}`, worktreePath);
+  } catch (e) {
+    console.log(`[acquireSlot] reset --hard FAILED: ${e.message}`);
+    throw e;
+  }
+  const after = git('rev-parse --short HEAD', worktreePath);
+  console.log(`[acquireSlot] HEAD-after-reset=${after}`);
   await gitAsync('clean -fd', worktreePath);
-  // checkout -B with no start-point uses HEAD, which is already at `base`
-  // after the reset — this is a metadata-only branch creation, no checkout.
   git(`checkout -B ${branchName}`, worktreePath);
+  console.log(`[acquireSlot] branch=${git('rev-parse --abbrev-ref HEAD', worktreePath)} HEAD=${git('rev-parse --short HEAD', worktreePath)}`);
   const status = git('status --porcelain', worktreePath);
   if (status) {
+    console.log(`[acquireSlot] DIRTY after checkout: ${status.slice(0, 200)}`);
     throw new Error(`Worktree not clean after checkout: ${status.slice(0, 200)}`);
   }
+  // Record the exact commit SHA that the feature branch was based on, so the
+  // ready handler can squash against this precise point rather than computing
+  // a merge-base against a potentially stale local ref at PR time.
+  const baseSha = git('rev-parse HEAD', worktreePath);
+  console.log(`[acquireSlot] done — clean base_sha=${baseSha}`);
+  return { baseSha };
 }
 
 // Return a pool worktree to its idle state: clean, detached at the default
@@ -160,15 +173,18 @@ async function acquireSlot({ worktreePath, branchDefault, branchName, remote = '
 // Async so the event loop stays responsive during checkout on large repos.
 async function releaseSlot({ worktreePath, branchDefault, branchName }) {
   if (!isValidWorktree(worktreePath)) return;
-  try { git('rebase --abort 2>/dev/null', worktreePath); } catch { /* no rebase in progress */ }
-  try { git('reset --hard', worktreePath); } catch { /* best-effort */ }
-  try { git('clean -fd', worktreePath); } catch { /* best-effort */ }
-  // Detach first so the feature branch is no longer checked out and can be
-  // deleted from within this same worktree.
-  try { await gitAsync(`checkout --detach ${branchDefault}`, worktreePath); } catch { /* best-effort */ }
-  if (branchName) {
-    try { git(`branch -D ${branchName}`, worktreePath); } catch { /* branch already gone */ }
+  const before = (() => { try { return git('rev-parse --short HEAD', worktreePath); } catch { return '?'; } })();
+  try { git('rebase --abort 2>/dev/null', worktreePath); } catch { }
+  try { git('reset --hard', worktreePath); } catch { }
+  try { git('clean -fd', worktreePath); } catch { }
+  try { await gitAsync(`checkout --detach ${branchDefault}`, worktreePath); } catch {
+    console.log(`[releaseSlot] checkout --detach ${branchDefault} FAILED (best-effort)`);
   }
+  if (branchName) {
+    try { git(`branch -D ${branchName}`, worktreePath); } catch { }
+  }
+  const after = (() => { try { return git('rev-parse --short HEAD', worktreePath); } catch { return '?'; } })();
+  console.log(`[releaseSlot] released ${branchName} from ${worktreePath}: HEAD ${before} → ${after}`);
 }
 
 module.exports = {

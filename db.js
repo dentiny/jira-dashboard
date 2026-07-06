@@ -89,6 +89,9 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN plan_notes TEXT`); } catch {}
 // Migration: add pr_url column to tickets (GitHub PR link for MERGE_STRATEGY=pr)
 try { db.exec(`ALTER TABLE tickets ADD COLUMN pr_url TEXT`); } catch {}
 
+// Migration: add base_sha column (origin/<default> commit at worktree acquire time)
+try { db.exec(`ALTER TABLE tickets ADD COLUMN base_sha TEXT`); } catch {}
+
 // ── Prepared statements ───────────────────────────────────
 const stmts = {
   // Tickets

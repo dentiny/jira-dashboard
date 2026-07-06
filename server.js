@@ -827,7 +827,7 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
     try { runGit(`diff --cached --quiet`, ticket.worktree_path); } catch { hasChanges = true; }
     if (!hasChanges) {
       try {
-        const ahead = parseInt(runGit(`rev-list --count ${config.branchDefault}..${ticket.branch_name}`, ticket.worktree_path), 10) || 0;
+        const ahead = parseInt(runGit(`rev-list --count origin/${config.branchDefault}..${ticket.branch_name}`, ticket.worktree_path), 10) || 0;
         if (ahead > 0) hasChanges = true;
       } catch {}
     }
@@ -841,12 +841,21 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
     const commitMsg = `${ticket.id}: ${ticket.title}`;
     runGit(`add -A`, ticket.worktree_path);
 
-    try {
-      const mergeBase = runGit(`merge-base ${config.branchDefault} ${ticket.branch_name}`);
-      runGit(`reset --soft ${mergeBase}`, ticket.worktree_path);
-      db.logActivity(ticket.id, 'squashed', `All commits squashed to merge-base ${mergeBase.slice(0, 7)}`);
-    } catch {
-      db.logActivity(ticket.id, 'squash_skipped', 'Could not find merge-base, committing as-is');
+    // Squash against the exact base commit recorded at worktree acquire time.
+    // Using the run-time merge-base against the local branch is unsafe: local
+    // branches can be thousands of commits behind on busy monorepos, and
+    // reset --soft to that stale point would sweep in every intervening file
+    // change as part of this PR's diff.
+    const baseSha = ticket.base_sha;
+    if (baseSha) {
+      try {
+        runGit(`reset --soft ${baseSha}`, ticket.worktree_path);
+        db.logActivity(ticket.id, 'squashed', `All commits squashed to base ${baseSha.slice(0, 7)}`);
+      } catch {
+        db.logActivity(ticket.id, 'squash_skipped', 'Could not reset to recorded base, committing as-is');
+      }
+    } else {
+      db.logActivity(ticket.id, 'squash_skipped', 'No base_sha recorded — committing as-is');
     }
 
     runGit(`commit -m "${escShell(commitMsg)}"`, ticket.worktree_path);
