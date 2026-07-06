@@ -93,14 +93,18 @@ function ticketId(title) {
 // object/string rather than plain text. Normalize it to readable text.
 function formatPlanText(plan) {
   if (!plan) return '';
-  if (typeof plan === 'object') {
-    return plan.plan || plan.description || plan.summary || JSON.stringify(plan, null, 2);
-  }
+  const extract = (obj) =>
+    obj.plan || obj.description || obj.summary
+    || (typeof obj.text === 'string' ? obj.text : null)
+    || (typeof obj.content === 'string' ? obj.content : null)
+    || (typeof obj.message === 'string' ? obj.message : null)
+    || '';
+  if (typeof plan === 'object') return extract(plan);
   if (typeof plan === 'string') {
     try {
       const parsed = JSON.parse(plan);
       if (typeof parsed === 'string') return parsed;
-      return parsed.plan || parsed.description || parsed.summary || JSON.stringify(parsed, null, 2);
+      return extract(parsed);
     } catch {
       return plan;
     }

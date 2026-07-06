@@ -212,4 +212,73 @@ const os = require('os');
   }
 })();
 
+// ── formatPlanText: extracts readable text from plan ──────
+(function testFormatPlanText() {
+  function formatPlanText(plan) {
+    if (!plan) return '';
+    const extract = (obj) =>
+      obj.plan || obj.description || obj.summary
+      || (typeof obj.text === 'string' ? obj.text : null)
+      || (typeof obj.content === 'string' ? obj.content : null)
+      || (typeof obj.message === 'string' ? obj.message : null)
+      || '';
+    if (typeof plan === 'object') return extract(plan);
+    if (typeof plan === 'string') {
+      try {
+        const parsed = JSON.parse(plan);
+        if (typeof parsed === 'string') return parsed;
+        return extract(parsed);
+      } catch {
+        return plan;
+      }
+    }
+    return String(plan);
+  }
+
+  // plain string → pass through
+  assert.strictEqual(formatPlanText('do the thing'), 'do the thing');
+
+  // object with plan key
+  assert.strictEqual(formatPlanText({ plan: 'implement foo' }), 'implement foo');
+
+  // object with description key
+  assert.strictEqual(formatPlanText({ description: 'add bar' }), 'add bar');
+
+  // object with text key
+  assert.strictEqual(formatPlanText({ text: 'refactor baz' }), 'refactor baz');
+
+  // object with content key
+  assert.strictEqual(formatPlanText({ content: 'fix qux' }), 'fix qux');
+
+  // object with message key
+  assert.strictEqual(formatPlanText({ message: 'update quux' }), 'update quux');
+
+  // unrecognized object → empty string (no raw JSON dump)
+  assert.strictEqual(formatPlanText({ type: 'step_start', part: {} }), '');
+
+  // JSON string with plan field
+  assert.strictEqual(formatPlanText('{"plan":"add tests"}'), 'add tests');
+
+  // JSON string with description field
+  assert.strictEqual(formatPlanText('{"description":"write docs"}'), 'write docs');
+
+  // JSON string with text field (event format)
+  assert.strictEqual(formatPlanText('{"type":"text","text":"hello"}'), 'hello');
+
+  // JSON string that is just a string
+  assert.strictEqual(formatPlanText('"simple"'), 'simple');
+
+  // JSON string with unrecognized structure → empty
+  assert.strictEqual(formatPlanText('{"type":"step_start","sessionID":"ses_123"}'), '');
+
+  // null/undefined → empty
+  assert.strictEqual(formatPlanText(null), '');
+  assert.strictEqual(formatPlanText(undefined), '');
+
+  // empty string → empty
+  assert.strictEqual(formatPlanText(''), '');
+
+  console.log('PASS: formatPlanText');
+})();
+
 console.log('\n✅ All server-helper tests passed\n');
