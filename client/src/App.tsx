@@ -70,9 +70,9 @@ type Sug = { id: string; title: string; content: string }
    Stage vocabulary — single source of truth.
    Order in the board, label, color, accent dot.
    ───────────────────────────────────────────────────────── */
-type Stage = 'clarification' | 'implementation' | 'review' | 'done' | 'closed'
+type Stage = 'clarification' | 'implementation' | 'review' | 'done'
 
-const STAGES: Stage[] = ['clarification', 'implementation', 'review', 'done', 'closed']
+const STAGES: Stage[] = ['clarification', 'implementation', 'review', 'done']
 
 const STAGE_META: Record<Stage, { label: string; dot: string; pill: string }> = {
   clarification: {
@@ -94,11 +94,6 @@ const STAGE_META: Record<Stage, { label: string; dot: string; pill: string }> = 
     label: 'Done',
     dot:   'bg-ink-3',
     pill:  'bg-surface-3 text-ink-2 ring-1 ring-border',
-  },
-  closed: {
-    label: 'Closed',
-    dot:   'bg-red-400',
-    pill:  'bg-red-50 text-red-700 ring-1 ring-red-200/70',
   },
 }
 
@@ -860,7 +855,7 @@ export default function App() {
               if (prev.status === 'running' && f.status === 'idle') {
                 const label = f.stage === 'review' ? 'ready for review' :
                   f.stage === 'clarification' ? 'questions ready' :
-                  f.stage === 'closed' ? 'closed' : 'done'
+                  'done'
                 notify(f.title || f.id, `Stage: ${f.stage} — ${label}`)
               } else if (f.status === 'running' && prev.status !== 'running') {
                 notify(f.title || f.id, `Started: ${f.stage}`)
@@ -1117,7 +1112,7 @@ export default function App() {
 
   /* Group tickets by stage once */
   const byStage = useMemo(() => {
-    const m: Record<Stage, T[]> = { clarification: [], implementation: [], review: [], done: [], closed: [] }
+    const m: Record<Stage, T[]> = { clarification: [], implementation: [], review: [], done: [] }
     for (const t of tickets) {
       if (t.stage in m) (m as any)[t.stage].push(t)
     }
@@ -1212,7 +1207,7 @@ export default function App() {
         )}
 
         {/* ── Board ── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5">
           {STAGES.map(stage => {
             const items = byStage[stage]
             const meta = STAGE_META[stage]
@@ -1727,7 +1722,7 @@ export default function App() {
                   </>
                 )}
 
-                {sel.stage === 'closed' && cfg.mergeStrategy === 'pr' && resolvePrUrl(sel) && (
+                {sel.stage === 'done' && cfg.mergeStrategy === 'pr' && resolvePrUrl(sel) && (
                   <div className="rounded-lg border border-border bg-surface-3 p-3.5 flex items-start gap-2.5">
                     <GitPullRequest className="h-4 w-4 text-ink-3 mt-0.5 shrink-0" />
                     <div className="t-body text-ink-2">
@@ -1755,7 +1750,7 @@ export default function App() {
 
           {/* Footer */}
           <DialogFooter>
-            {sel.stage !== 'closed' && (
+            {sel.stage !== 'done' && (
               <Btn variant="danger" onClick={() => closeTicket(sel.id)} disabled={busy}>
                 <Ban className="h-3.5 w-3.5" /> Close ticket
               </Btn>

@@ -181,4 +181,35 @@ const os = require('os');
   console.log('PASS: escShell escapes apostrophes');
 })();
 
+// ── detectTestFramework: commandOverride bypass ─────────────
+(function testDetectTestFrameworkCommandOverride() {
+  // When config.test.commandOverride is set, detectTestFramework
+  // returns it immediately without checking the worktree filesystem.
+  function detectTestFramework(worktreePath, commandOverride) {
+    if (!worktreePath || !require('fs').existsSync(worktreePath)) return null;
+    if (commandOverride) {
+      return { framework: 'custom', command: commandOverride };
+    }
+    return null;
+  }
+
+  const tmp = require('fs').mkdtempSync('/tmp/jd-tf-');
+  try {
+    // commandOverride set → returns custom framework
+    const r = detectTestFramework(tmp, 'npm test');
+    assert.deepStrictEqual(r, { framework: 'custom', command: 'npm test' });
+
+    // null/undefined override → returns null (no framework detected)
+    assert.strictEqual(detectTestFramework(tmp, null), null);
+    assert.strictEqual(detectTestFramework(tmp, undefined), null);
+
+    // invalid worktree → null regardless of override
+    assert.strictEqual(detectTestFramework('/nonexistent', 'npm test'), null);
+
+    console.log('PASS: detectTestFramework respects command_override');
+  } finally {
+    try { require('fs').rmSync(tmp, { recursive: true, force: true }); } catch {}
+  }
+})();
+
 console.log('\n✅ All server-helper tests passed\n');

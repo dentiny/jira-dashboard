@@ -85,6 +85,11 @@
     "test": {
       "type": "object",
       "properties": {
+        "enabled": {
+          "description": "Enable auto-running unit tests after each implementation. Manual re-run button always available.",
+          "type": "boolean",
+          "default": false
+        },
         "command_override": {
           "description": "Explicit test command instead of auto-detection. Override with JIRA_TEST_CMD in .env.",
           "type": ["string", "null"],

@@ -133,11 +133,11 @@ function killTicketProcess(ticketId) {
   return true;
 }
 
-// A ticket was moved to the terminal 'closed' stage (via /close) while a stage
+// A ticket was moved to the terminal 'done' stage (via /close) while a stage
 // was still running. Handlers check this after their coder run so they don't
 // resurrect a closed ticket with a post-run stage transition.
 function isClosed(ticketId) {
-  return db.getTicket(ticketId)?.stage === 'closed';
+  return db.getTicket(ticketId)?.stage === 'done';
 }
 
 // True when a ticket should no longer receive state updates — it was either
@@ -145,7 +145,7 @@ function isClosed(ticketId) {
 // background work (e.g. pushAndOpenPr) that can outlive a /close or /delete.
 function ticketGone(ticketId) {
   const t = db.getTicket(ticketId);
-  return !t || t.stage === 'closed';
+  return !t || t.stage === 'done';
 }
 
 async function runCoder(ticketId, prompt, opts = {}) {
@@ -1404,13 +1404,13 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
 // ── Close ticket ──────────────────────────────────────────
 // Terminal action available in ANY stage — including while a stage is
 // running. Kills the active coder process (if any), releases the worktree /
-// pool slot and branch, then moves the ticket to the terminal 'closed' stage.
+// pool slot and branch, then moves the ticket to the terminal 'done' stage.
 // An already-closed ticket cannot be closed again.
 app.post('/api/tickets/:id/close', (req, res) => {
   const ticket = db.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-  if (ticket.stage === 'closed') {
-    return res.status(400).json({ error: 'Ticket is already closed' });
+  if (ticket.stage === 'done') {
+    return res.status(400).json({ error: 'Ticket is already done' });
   }
 
   // 1. Stop any in-flight coder process for this ticket.
@@ -1419,12 +1419,12 @@ app.post('/api/tickets/:id/close', (req, res) => {
   // 2. Mark terminal BEFORE releasing the worktree. A handler whose coder
   //    process we just killed will resume in its catch block; seeing the
   //    closed stage (via isClosed) it bails instead of reopening the ticket.
-  db.updateTicket(ticket.id, { stage: 'closed', status: 'idle' });
+  db.updateTicket(ticket.id, { stage: 'done', status: 'idle' });
 
   // 3. Release the worktree / pool slot and branch (safe when there is none).
   worktrees.release(ticket.id);
 
-  db.logActivity(ticket.id, 'closed', killed ? 'closed — running process killed' : 'closed');
+  db.logActivity(ticket.id, 'closed', killed ? 'closed (running process killed)' : 'closed');
   const updated = db.getTicket(ticket.id);
   sseBroadcast(ticket.id, 'ticket', updated);
   res.json({ success: true, ticket: updated });
@@ -1511,15 +1511,24 @@ app.post('/api/test', (req, res) => {
   runResults[runId] = { status: 'running', file: outFile };
   res.json({ runId });
 
-  const py = config.venvPython();
-  const testModule = `${config.projectName}.test`;
   const out = fs.createWriteStream(outFile);
-  const proc = spawn(py, ['-m', testModule], {
-    cwd: config.projectDir,
-    env: { ...process.env, PYTHONPATH: path.join(config.projectDir, config.venv.pythonpath) },
-    timeout: config.test.timeout,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  let proc;
+  if (config.test.commandOverride) {
+    proc = spawn('bash', ['-lc', config.test.commandOverride], {
+      cwd: config.projectDir,
+      timeout: config.test.timeout,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } else {
+    const py = config.venvPython();
+    const testModule = `${config.projectName}.test`;
+    proc = spawn(py, ['-m', testModule], {
+      cwd: config.projectDir,
+      env: { ...process.env, PYTHONPATH: path.join(config.projectDir, config.venv.pythonpath) },
+      timeout: config.test.timeout,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
   proc.stdout.pipe(out);
   proc.stderr.pipe(out);
   proc.on('close', code => { runResults[runId].status = code === 0 ? 'pass' : 'fail'; });
