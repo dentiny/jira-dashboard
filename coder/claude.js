@@ -1,27 +1,17 @@
 const path = require('path');
 
 module.exports = function claudeBackend(config, store) {
+  // Per-message token tracking for cumulative live display.
+  // Claude reports usage per-message (not cumulative), so we
+  // track deltas between consecutive message_delta events.
+  let _lastIn = 0, _lastOut = 0;
+
   return {
     name: 'claude',
 
     stats() { return store.lastUsage; },
 
     buildArgs(prompt, sessionId, title) {
-      // NOTE: Claude Code uses `--output-format` (not `--format`). The latter
-      // is an OpenCode flag and will be rejected by `claude` with
-      //   error: unknown option '--format'
-      // `--output-format stream-json` also requires `--verbose` to be passed
-      // before it, or `claude` errors with
-      //   "When using --print, --output-format=stream-json requires --verbose"
-      // `--include-partial-messages` streams text_delta events so the live
-      // view shows the coder's output as it's produced (see formatProgress).
-      // `--dangerously-skip-permissions` is REQUIRED for the implement stage:
-      // in headless `-p` mode there is no interactive prompt, so any Edit /
-      // Write / Bash tool call that needs approval is auto-denied. Without this
-      // flag the coder produces a text-only "I couldn't get permission" result,
-      // makes zero file changes, and the commit is silently skipped
-      // ("no uncommitted changes in worktree").
-      // Resume a previous session with `-r <sessionId>`.
       const args = ['-p', '--verbose', '--output-format', 'stream-json', '--include-partial-messages', '--dangerously-skip-permissions'];
       if (sessionId) args.push('-r', sessionId);
       args.push(prompt);
@@ -41,13 +31,18 @@ module.exports = function claudeBackend(config, store) {
         const evt = JSON.parse(line);
         if (evt.type === 'stream_event') {
           const ee = evt.event;
-          // Real-time token data from message_start / message_delta
-          if ((ee?.type === 'message_start' && ee.message?.usage) || (ee?.type === 'message_delta' && ee.usage)) {
-            const usage = ee.type === 'message_start' ? ee.message.usage : ee.usage;
+          if (ee?.type === 'message_start') { _lastIn = 0; _lastOut = 0; }
+          if (ee?.type === 'message_delta' && ee.usage) {
+            const msgIn = ee.usage.input_tokens || 0;
+            const msgOut = ee.usage.output_tokens || 0;
+            const deltaIn = Math.max(0, msgIn - _lastIn);
+            const deltaOut = Math.max(0, msgOut - _lastOut);
+            _lastIn = msgIn; _lastOut = msgOut;
+            const prev = store.lastUsage;
             store.setUsage({
-              cost: 0,
-              input: String(usage.input_tokens || 0),
-              output: String(usage.output_tokens || 0),
+              cost: prev.cost || 0,
+              input: String((parseInt(prev.input) || 0) + deltaIn),
+              output: String((parseInt(prev.output) || 0) + deltaOut),
             });
           }
           if (ee?.type === 'content_block_delta' && ee.delta?.type === 'text_delta') {
