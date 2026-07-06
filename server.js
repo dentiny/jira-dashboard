@@ -167,7 +167,7 @@ async function finishImplement(ticketId, worktreePath, runTokens, onProgress) {
     try { runGit(cmd, worktreePath); } catch {
       db.logActivity(ticket.id, 'commit_retry', 'Uncommitted changes — asking coder to commit');
       await runCoder(ticket.id,
-        `You made changes but didn't commit. Review and commit ALL changes with clear messages. Don't make new changes — only commit what exists.`,
+        `You made changes but didn't commit. Review and commit ALL changes with clear messages. Don't make new changes — only commit what exists. Do NOT push to any remote. Only commit locally.`,
         { timeout: config.coder.timeouts.command, onProgress });
       break;
     }

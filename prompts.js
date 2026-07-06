@@ -48,7 +48,8 @@ Your job:
 6. Update relevant documentation
 7. Commit ALL changes with clear messages as you go — you MUST commit before declaring implementation complete. Do NOT declare the task done until git add + git commit has been run.
 
-Do NOT echo or repeat the ticket context back to the user — read it from the file and proceed.`,
+Do NOT echo or repeat the ticket context back to the user — read it from the file and proceed.
+Do NOT push to any remote. Only commit locally.`,
 
   resolveConflictAuto: `You are auto-resolving git rebase conflicts for a ticket in the ${PNAME} project.
 
