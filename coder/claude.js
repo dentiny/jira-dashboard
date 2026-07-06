@@ -39,8 +39,20 @@ module.exports = function claudeBackend(config, store) {
     formatProgress(line) {
       try {
         const evt = JSON.parse(line);
-        if (evt.type === 'stream_event' && evt.event?.type === 'content_block_delta' && evt.event.delta?.type === 'text_delta') {
-          return evt.event.delta.text;
+        if (evt.type === 'stream_event') {
+          const ee = evt.event;
+          // Real-time token data from message_start / message_delta
+          if ((ee?.type === 'message_start' && ee.message?.usage) || (ee?.type === 'message_delta' && ee.usage)) {
+            const usage = ee.type === 'message_start' ? ee.message.usage : ee.usage;
+            store.setUsage({
+              cost: 0,
+              input: String(usage.input_tokens || 0),
+              output: String(usage.output_tokens || 0),
+            });
+          }
+          if (ee?.type === 'content_block_delta' && ee.delta?.type === 'text_delta') {
+            return ee.delta.text;
+          }
         }
       } catch {}
       return null;
