@@ -359,17 +359,19 @@ function close() {
 
 // ── Stage resource aggregation ────────────────────────────
 // Walks the activity log for a ticket and accumulates per-stage
-// deltas.  Since the same stage may repeat across cycles (e.g.
-// after review feedback), per-stage contributions are computed
-// by summing deltas between CONSECUTIVE resource entries that
-// share the same stage tag — NOT by a single (last - first)
-// across the whole group, which would pull in interleaved costs
-// from other stages.
+// buckets.  Tokens/cost come from cumulative store.lastUsage, so
+// each consecutive-pair delta (regardless of stage) is attributed
+// to the stage active at the START of that interval.  This
+// correctly captures costs across distinct cycles (e.g. Clarify 1,
+// Impl 1, Clarify 2, Impl 2):
 //
-// TOKEN/COST: opencode stats are project-wide cumulative, so
-// the grand total uses (last overall - first overall) across ALL
-// entries.  CPU/elapsed are per-process (resets on each coder run),
-// so the grand total sums per-stage buckets.
+//   Clar1 entries (value S0) → Impl1 (S1 = S0 + cost_Clar1)
+//     → delta S1-S0 attributed to Clar1 ✓
+//   Impl1 entries (S1) → Clar2 (S2 = S1 + cost_Impl1)
+//     → delta S2-S1 attributed to Impl1 ✓
+//
+// CPU/elapsed are per-process (reset on each run), so they use
+// consecutive-same-stage deltas only.
 //
 // Returns:
 //   {
@@ -412,13 +414,19 @@ function getStageResources(ticketId) {
     const cp = parseKv(r.detail);
     peakMems[stage] = Math.max(peakMems[stage], parseFloat(cp.mem) || 0);
 
-    if (prev && stage === prevStage) {
+    if (prev) {
       const pp = parseKv(prev.detail);
-      buckets[stage].cpu += Math.max(0, (parseFloat(cp.cpu) || 0) - (parseFloat(pp.cpu) || 0));
-      buckets[stage].elapsed += Math.max(0, (parseInt(cp.elapsed) || 0) - (parseInt(pp.elapsed) || 0));
-      buckets[stage].tokens_in += Math.max(0, _parseToken(cp.tokens_in) - _parseToken(pp.tokens_in));
-      buckets[stage].tokens_out += Math.max(0, _parseToken(cp.tokens_out) - _parseToken(pp.tokens_out));
-      buckets[stage].cost += Math.max(0, _parseCost(cp.cost) - _parseCost(pp.cost));
+      const prevStageName = prev.stage || 'unknown';
+      // Tokens/cost are cumulative — every consecutive pair delta is
+      // attributed to the stage active at the start of the interval.
+      buckets[prevStageName].tokens_in += Math.max(0, _parseToken(cp.tokens_in) - _parseToken(pp.tokens_in));
+      buckets[prevStageName].tokens_out += Math.max(0, _parseToken(cp.tokens_out) - _parseToken(pp.tokens_out));
+      buckets[prevStageName].cost += Math.max(0, _parseCost(cp.cost) - _parseCost(pp.cost));
+      // CPU/elapsed are per-process — only delta between same-stage entries
+      if (stage === prevStage) {
+        buckets[stage].cpu += Math.max(0, (parseFloat(cp.cpu) || 0) - (parseFloat(pp.cpu) || 0));
+        buckets[stage].elapsed += Math.max(0, (parseInt(cp.elapsed) || 0) - (parseInt(pp.elapsed) || 0));
+      }
     }
 
     if (stage !== prevStage) {
