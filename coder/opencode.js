@@ -7,7 +7,7 @@ module.exports = function opencodeBackend(config, store) {
 
     stats() {
       try {
-        const out = execSync(`${config.coder.bin} stats`, {
+        const out = execSync(`${config.coder.bin} stats --project ''`, {
           encoding: 'utf-8',
           timeout: config.coder.timeouts.command,
           stdio: 'pipe',
