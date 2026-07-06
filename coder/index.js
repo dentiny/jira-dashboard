@@ -76,7 +76,9 @@ function run(prompt, opts = {}) {
   const { sessionId, title, onProgress } = opts;
 
   if (backend.runDummy) {
-    return backend.runDummy(prompt);
+    return backend.runDummy(prompt).then(text => ({
+      text, tokens: null, sessionId: null,
+    }));
   }
 
   return new Promise((resolve, reject) => {
@@ -119,15 +121,15 @@ function run(prompt, opts = {}) {
     proc.on('close', code => {
       if (resMonitor) resMonitor.close();
       const raw = stdout.trim();
-      const output = backend.parseOutput ? backend.parseOutput(raw) : raw;
+      const parsed = backend.parseOutput ? backend.parseOutput(raw) : { text: raw, tokens: null, sessionId: null };
       if (code === 0) {
-        if (!output && stderr.trim()) {
+        if (!parsed.text && stderr.trim()) {
           reject(new Error(`Coder produced no output: ${stderr.slice(-500)}`));
         } else {
-          resolve(output);
+          resolve(parsed);
         }
-      } else if (output) {
-        resolve(output);
+      } else if (parsed.text) {
+        resolve(parsed);
       } else {
         const reason = code === null ? 'killed (signal/timeout)' : `exited ${code}`;
         reject(new Error(`Coder ${reason}: ${stderr.slice(-500)}`));

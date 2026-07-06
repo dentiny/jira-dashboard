@@ -31,7 +31,7 @@ function ticketGone(ticketId) {
 async function runCoder(ticketId, prompt, opts = {}) {
   const ticket = db.getTicket(ticketId);
   try {
-    return await coder.run(prompt, {
+    const result = await coder.run(prompt, {
       sessionId: ticket?.ocode_session,
       title: `ticket-${ticketId}`,
       timeout: opts.timeout || config.coder.timeouts.clarify,
@@ -39,12 +39,20 @@ async function runCoder(ticketId, prompt, opts = {}) {
       cwd: opts.cwd,
       onSpawn: (proc) => runningProcs.set(ticketId, proc),
     });
+    if (result.sessionId) {
+      db.updateTicketField(ticketId, 'ocode_session', result.sessionId);
+    }
+    return result;
   } finally {
     runningProcs.delete(ticketId);
   }
 }
 
-function captureSessionId(ticketId) {
+function captureSessionId(ticketId, sessionId) {
+  if (sessionId) {
+    db.updateTicketField(ticketId, 'ocode_session', sessionId);
+    return sessionId;
+  }
   const coderMod = require('./coder');
   const sid = coderMod.getLastSessionId();
   if (sid) {

@@ -50,23 +50,29 @@ module.exports = function opencodeBackend(config, store) {
       try {
         const lines = stdout.trim().split('\n');
         let text = '';
+        let tokens = null;
+        let sessionId = null;
         for (const line of lines) {
           try {
             const evt = JSON.parse(line);
-            if (evt.type === 'step_start' && evt.sessionID) store.setSessionId(evt.sessionID);
+            if (evt.type === 'step_start' && evt.sessionID) {
+              sessionId = evt.sessionID;
+              store.setSessionId(evt.sessionID);
+            }
             if (evt.type === 'step_finish' && evt.part?.tokens) {
-              store.setUsage({
+              tokens = {
                 cost: evt.part.cost || 0,
                 input: String(evt.part.tokens.input || 0),
                 output: String(evt.part.tokens.output || 0),
-              });
+              };
+              store.setUsage(tokens);
             }
             if (evt.type === 'text' && evt.part?.type === 'text') text += evt.part.text || '';
           } catch {}
         }
-        if (text) return text;
+        if (text) return { text, tokens, sessionId };
       } catch {}
-      return stdout;
+      return { text: stdout, tokens: null, sessionId: null };
     },
   };
 };

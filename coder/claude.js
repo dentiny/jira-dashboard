@@ -49,24 +49,27 @@ module.exports = function claudeBackend(config, store) {
     parseOutput(stdout) {
       try {
         const trimmed = stdout.trim();
-        if (!trimmed) return stdout;
+        if (!trimmed) return { text: stdout, tokens: null, sessionId: null };
         const lines = trimmed.split('\n');
 
         if (lines.length === 1) {
           const data = JSON.parse(trimmed);
           if (data.result !== undefined) {
-            store.setUsage({
+            const tokens = {
               cost: data.total_cost_usd || 0,
               input: String(data.usage?.input_tokens || 0),
               output: String(data.usage?.output_tokens || 0),
-            });
-            if (data.session_id) store.setSessionId(data.session_id);
-            return String(data.result);
+            };
+            const sessionId = data.session_id || null;
+            store.setUsage(tokens);
+            if (sessionId) store.setSessionId(sessionId);
+            return { text: String(data.result), tokens, sessionId };
           }
-          return stdout;
+          return { text: stdout, tokens: null, sessionId: null };
         }
 
         let text = '';
+        let tokens = null;
         let sessionId = null;
         for (const line of lines) {
           try {
@@ -80,21 +83,22 @@ module.exports = function claudeBackend(config, store) {
             }
             if (evt.type === 'result' && evt.subtype === 'success') {
               if (evt.total_cost_usd !== undefined) {
-                store.setUsage({
+                tokens = {
                   cost: evt.total_cost_usd,
                   input: String(evt.usage?.input_tokens || 0),
                   output: String(evt.usage?.output_tokens || 0),
-                });
+                };
+                store.setUsage(tokens);
               }
-              if (evt.session_id) store.setSessionId(evt.session_id);
+              if (evt.session_id) { sessionId = evt.session_id; store.setSessionId(evt.session_id); }
               else if (sessionId) store.setSessionId(sessionId);
               if (evt.result !== undefined) text = String(evt.result);
             }
           } catch {}
         }
-        if (text) return text;
+        if (text) return { text, tokens, sessionId };
       } catch {}
-      return stdout;
+      return { text: stdout, tokens: null, sessionId: null };
     },
   };
 };

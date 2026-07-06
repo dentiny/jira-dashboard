@@ -5,7 +5,6 @@ const fs = require('fs');
 const os = require('os');
 
 const config = require('./config');
-const coder = require('./coder');
 const prompts = require('./prompts');
 const db = require('./db');
 const worktrees = require('./worktree-manager');
@@ -60,9 +59,10 @@ async function generateConflictClarification(ticket, conflictFiles, gitStatus, r
         sseBroadcast(ticket.id, 'stdout', { text: `[conflict] ${line}` });
       }
     };
-    const output = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress });
-    captureSessionId(ticket.id);
+    const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress });
+    captureSessionId(ticket.id, result.sessionId);
     db.updateTicketField(ticket.id, 'status', 'idle');
+    const output = result.text;
 
     let parsed;
     try {
@@ -152,17 +152,16 @@ async function pushAndOpenPr(ticketId, branchName, title, worktreePath) {
 
 // ── Post-implement finalizer (commit, diff, transition) ─────
 // Shared between the /implement handler and crash-recovery re-attach.
-async function finishImplement(ticketId, worktreePath, tokensBefore, onProgress) {
+async function finishImplement(ticketId, worktreePath, runTokens, onProgress) {
   const ticket = db.getTicket(ticketId);
 
-  const td = coder.getStats();
-  const tokenDelta = tokensBefore
-    ? { cost: (td.cost - tokensBefore.cost).toFixed(3), input: td.input, output: td.output }
-    : { cost: (td.cost - (ticket.token_cost || 0)).toFixed(3), input: td.input, output: td.output };
+  const tokens = runTokens || { cost: 0, input: '0', output: '0' };
   db.updateTicket(ticket.id, {
-    token_cost: parseFloat(tokenDelta.cost), token_input: tokenDelta.input, token_output: tokenDelta.output,
+    token_cost: parseFloat(tokens.cost) || 0,
+    token_input: tokens.input || '0',
+    token_output: tokens.output || '0',
   });
-  db.logActivity(ticket.id, 'token_usage', JSON.stringify(tokenDelta));
+  db.logActivity(ticket.id, 'token_usage', JSON.stringify(tokens));
 
   for (const cmd of [`diff --quiet`, `diff --cached --quiet`]) {
     try { runGit(cmd, worktreePath); } catch {
@@ -323,9 +322,10 @@ app.post('/api/tickets/:id/clarify', async (req, res) => {
         sseBroadcast(ticket.id, 'stdout', { text: line });
       }
     };
-    const output = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress });
-    captureSessionId(ticket.id);
+    const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress });
+    captureSessionId(ticket.id, result.sessionId);
     db.updateTicketField(ticket.id, 'status', 'idle');
+    const output = result.text;
 
     let parsed;
     try {
@@ -420,8 +420,9 @@ app.post('/api/tickets/:id/answer', async (req, res) => {
         sseBroadcast(ticket.id, 'stdout', { text: line });
       }
     };
-    const output = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress, cwd: config.projectDir });
+    const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress, cwd: config.projectDir });
     db.updateTicketField(ticket.id, 'status', 'idle');
+    const output = result.text;
 
     let parsed;
     try {
@@ -522,8 +523,6 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
     db.logActivity(ticket.id, 'implement_start');
     db.updateTicketField(ticket.id, 'status', 'running');
 
-    const tokensBefore = coder.getStats();
-
     // File-change monitor
     const seenFiles = new Set();
     fileMonitor = setInterval(() => {
@@ -560,7 +559,7 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
       }
     };
 
-    const output = await runCoder(ticket.id, prompt, {
+    const runResult = await runCoder(ticket.id, prompt, {
       timeout: config.coder.timeouts.implement,
       onProgress,
     });
@@ -573,12 +572,12 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
       return res.json({ closed: true, ticket: db.getTicket(ticket.id) });
     }
 
-    const result = await finishImplement(ticket.id, worktreePath, tokensBefore, onProgress);
+    const implResult = await finishImplement(ticket.id, worktreePath, runResult.tokens, onProgress);
 
     res.json({
-      ...result,
+      ...implResult,
       worktree_path: worktreePath, branch_name: branchName,
-      output_summary: output.slice(-1000),
+      output_summary: runResult.text.slice(-1000),
       ticket: db.getTicket(ticket.id),
     });
   } catch (err) {
@@ -709,7 +708,7 @@ app.post('/api/tickets/:id/rebase', async (req, res) => {
 
       db.updateTicketField(ticket.id, 'status', 'running');
       try {
-        const resolveOutput = await runCoder(ticket.id, resolvePrompt, {
+        const resolveResult = await runCoder(ticket.id, resolvePrompt, {
           timeout: config.coder.timeouts.implement,
           onProgress: (line) => {
             if (line.startsWith('[resource] ')) {
@@ -723,6 +722,7 @@ app.post('/api/tickets/:id/rebase', async (req, res) => {
           },
           cwd: ticket.worktree_path,
         });
+        const resolveOutput = resolveResult.text;
 
         // Check if conflicts remain
         let remainingConflicts = [];
@@ -1106,7 +1106,8 @@ async function generateSuggestions(retries = 3) {
       );
 
       const fullPrompt = `${prompts.suggest}\n\nSuggest ${SUGGESTIONS_MAX} tickets.\n\nExplore the codebase in the project root, then read the context file at: ${contextFile}`;
-      const output = await runCoder(SUGGESTIONS_TICKET_ID, fullPrompt, { timeout: config.coder.timeouts.suggest, cwd: config.projectDir });
+      const result = await runCoder(SUGGESTIONS_TICKET_ID, fullPrompt, { timeout: config.coder.timeouts.suggest, cwd: config.projectDir });
+      const output = result.text;
       const jsonMatch = output.match(/\{[\s\S]*\}/);
       const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
       if (parsed && Array.isArray(parsed.tickets)) {
@@ -1218,11 +1219,11 @@ app.post('/api/suggestions/:id/dismiss', (req, res) => {
         console.log(`Recovered: ${tid} session alive — re-attaching`);
         (async () => {
           try {
-            await runCoder(tid, 'Continue implementing this ticket. The server was restarted but your session survived. Pick up where you left off.', {
+            const recoveryResult = await runCoder(tid, 'Continue implementing this ticket. The server was restarted but your session survived. Pick up where you left off.', {
               timeout: config.coder.timeouts.implement,
             });
             if (t.worktree_path && db.getTicket(tid)?.stage !== 'done') {
-              await finishImplement(tid, t.worktree_path);
+              await finishImplement(tid, t.worktree_path, recoveryResult.tokens);
             }
           } catch (err) {
             db.logActivity(tid, 'recover_error', `Re-attach failed: ${err.message}`);

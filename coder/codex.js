@@ -38,27 +38,29 @@ module.exports = function codexBackend(config, store) {
       try {
         const lines = stdout.trim().split('\n');
         let text = '';
+        let tokens = null;
+        let sessionId = null;
         for (const line of lines) {
           try {
             const evt = JSON.parse(line);
-            if (evt.type === 'thread.started' && evt.thread_id) store.setSessionId(evt.thread_id);
+            if (evt.type === 'thread.started' && evt.thread_id) {
+              sessionId = evt.thread_id;
+              store.setSessionId(evt.thread_id);
+            }
             if (evt.type === 'turn.completed' && evt.usage) {
               const input = parseInt(evt.usage.input_tokens, 10) || 0;
               const output = parseInt(evt.usage.output_tokens, 10) || 0;
-              store.setUsage({
-                cost: 0,
-                input: String(input),
-                output: String(output),
-              });
+              tokens = { cost: 0, input: String(input), output: String(output) };
+              store.setUsage(tokens);
             }
             if (evt.type === 'item.completed' && evt.item?.type === 'agent_message') {
               text += evt.item.text || '';
             }
           } catch {}
         }
-        if (text) return text;
+        if (text) return { text, tokens, sessionId };
       } catch {}
-      return stdout;
+      return { text: stdout, tokens: null, sessionId: null };
     },
   };
 };

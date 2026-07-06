@@ -59,8 +59,8 @@ function cleanupMock() {
   const coder = require('../coder');
 
   const result = await coder.run('test prompt', { timeout: 500 });
-  assert.ok(typeof result === 'string', 'run should return string');
-  assert.ok(result.length >= 0, 'run should not throw');
+  assert.ok(typeof result === 'object' && typeof result.text === 'string', 'run should return { text, tokens, sessionId }');
+  assert.ok(result.text.length >= 0, 'run should not throw');
   console.log('PASS: run with dummy backend resolves');
 
   cleanupMock();
@@ -148,7 +148,7 @@ function cleanupMock() {
   ].join('\n');
 
   const output = backend.parseOutput(sampleStdout);
-  assert.strictEqual(output, 'Repo contains docs, sdk, and examples directory.', 'extracted agent message text');
+  assert.strictEqual(output.text, 'Repo contains docs, sdk, and examples directory.', 'extracted agent message text');
   assert.strictEqual(store.lastSessionId, '0199a213-81c0-7800-8aa1-bbab2a035a53', 'session ID stored');
   assert.strictEqual(store.lastUsage.input, '24763', 'input tokens stored');
   assert.strictEqual(store.lastUsage.output, '122', 'output tokens stored');
@@ -165,7 +165,7 @@ function cleanupMock() {
 
   const raw = 'This is plain text output from codex';
   const result = backend.parseOutput(raw);
-  assert.strictEqual(result, raw, 'non-JSON output returned as-is');
+  assert.strictEqual(result.text, raw, 'non-JSON output returned as-is');
 
   console.log('PASS: codex parseOutput fallback to raw');
 })();
@@ -175,7 +175,7 @@ function cleanupMock() {
   const coder = require('../coder');
 
   const result = await coder.run('test prompt', { timeout: 500 });
-  assert.ok(typeof result === 'string', 'run with codex type should return string');
+  assert.ok(typeof result === 'object' && typeof result.text === 'string', 'run with codex type should return { output, tokens, sessionId }');
   console.log('PASS: run with codex type resolves');
 
   cleanupMock();
@@ -282,7 +282,7 @@ function cleanupMock() {
   ].join('\n');
 
   const output = backend.parseOutput(sampleStdout);
-  assert.strictEqual(output, 'partial done', 'result text extracted from final event');
+  assert.strictEqual(output.text, 'partial done', 'result text extracted from final event');
   assert.strictEqual(store.lastSessionId, 'sess-abc-123', 'session id stored');
   assert.strictEqual(store.lastUsage.input, '120', 'input tokens stored');
   assert.strictEqual(store.lastUsage.output, '60', 'output tokens stored');
@@ -303,7 +303,7 @@ function cleanupMock() {
   const backend = claudeBackend;
 
   const raw = 'plain text from claude --print without --output-format';
-  assert.strictEqual(backend.parseOutput(raw), raw, 'non-JSON output returned as-is');
+  assert.strictEqual(backend.parseOutput(raw).text, raw, 'non-JSON output returned as-is');
 
   console.log('PASS: claude parseOutput fallback to raw');
 })();
@@ -313,7 +313,7 @@ function cleanupMock() {
   const coder = require('../coder');
 
   const result = await coder.run('test prompt', { timeout: 500 });
-  assert.ok(typeof result === 'string', 'run with claude type should return string');
+  assert.ok(typeof result === 'object' && typeof result.text === 'string', 'run with claude type should return { output, tokens, sessionId }');
   console.log('PASS: run with claude type resolves');
 
   cleanupMock();
