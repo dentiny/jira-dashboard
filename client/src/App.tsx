@@ -586,8 +586,8 @@ function ResourceMetrics({
             <MetricCompact label="Memory"   value={`${mem.toFixed(0)} MB`} />
             <MetricCompact label="Threads"  value={cur?.threads || '—'} />
             <MetricCompact label="Elapsed"  value={`${el}s`} />
-            {cur?.tokens_in && <MetricCompact label="Tokens" value={`${fmtToken(deltaTokensIn)} in · ${fmtToken(deltaTokensOut)} out`} />}
-            {cur?.cost && <MetricCompact label="Cost" value={fmtCost(deltaCost)} />}
+            {cur?.tokens_in && <MetricCompact label="Tokens" value={`${fmtToken(parseToken(cur?.tokens_in))} in · ${fmtToken(parseToken(cur?.tokens_out))} out`} />}
+            {cur?.cost && <MetricCompact label="Cost" value={fmtCost(parseCost(cur?.cost))} />}
             {cpuPct !== undefined && (
               <div className="col-span-2">
                 <div className="flex items-baseline justify-between t-meta text-ink-2 uppercase tracking-wider font-medium">
