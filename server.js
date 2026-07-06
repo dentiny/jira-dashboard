@@ -661,7 +661,7 @@ app.post('/api/tickets/:id/rebase', async (req, res) => {
     // default-branch ref drifts behind origin; freshDefaultBase fetches and
     // resolves origin/<default> (falling back to the local ref when there's no
     // remote). This mirrors how new worktrees are based off the fresh tip.
-    const rebaseBase = await worktrees.freshDefaultBase(ticket.worktree_path);
+    const rebaseBase = worktrees.freshDefaultBase(ticket.worktree_path);
 
     // Attempt the rebase
     try {

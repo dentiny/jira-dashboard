@@ -51,23 +51,13 @@ function gitAsync(args, cwd, timeout) {
   return execAsync(`git ${args}`, cwd, timeout);
 }
 
-// Resolve the freshest base ref to branch/rebase a ticket off, refreshing from
-// the remote first. Pool worktrees are long-lived and nothing else fetches, so
-// the LOCAL default-branch ref (e.g. `develop`) drifts behind origin — observed
-// ~2 weeks stale on a busy monorepo — and every ticket would start off (or
-// rebase onto) an ancient base. We fetch the default branch from `remote`
-// (best-effort) and prefer the updated `<remote>/<branchDefault>` remote-
-// tracking ref; if there is no remote (offline / local-only repo) or the fetch
-// fails, we fall back to the local ref so those setups still work. Returns a ref
-// name suitable for `checkout -B` / `worktree add` / `rebase`.
-// The fetch runs asynchronously so the event loop stays responsive on large repos.
-async function freshDefaultBase({ cwd, branchDefault, remote = 'origin' }) {
+// Resolve the base ref for a new ticket branch. Returns the remote-tracking ref
+// (e.g. origin/develop) if it exists locally — no fetch is performed, since a
+// long fetch can timeout on large monorepos and the remote-tracking ref from
+// a previous fetch is still far more recent than the local branch. Falls back
+// to the local branch when there is no remote at all (offline / local-only repo).
+function freshDefaultBase({ cwd, branchDefault, remote = 'origin' }) {
   const remoteRef = `${remote}/${branchDefault}`;
-  try {
-    // A single-branch fetch updates the <remote>/<branch> tracking ref on a
-    // standard clone; keep it scoped so we don't pull every branch of a monorepo.
-    await gitAsync(`fetch ${remote} ${branchDefault}`, cwd, FETCH_TIMEOUT);
-  } catch { /* offline or no such remote — fall back to the local ref below */ }
   try {
     git(`rev-parse --verify --quiet ${remoteRef}^{commit}`, cwd);
     return remoteRef;
@@ -139,21 +129,30 @@ function provisionPool({ projectDir, worktreesDir, branchDefault, count }) {
 }
 
 // Reset a pool worktree to a clean checkout of a fresh feature branch, ready
-// for a ticket. Assumes the slot is a valid (idle, detached) pool worktree.
-// Async so the event loop stays responsive during fetch + checkout on large repos.
+// for a new ticket. Does NOT fetch — the remote-tracking ref from the previous
+// fetch (e.g. origin/develop) is used directly, even if slightly stale, because
+// a fetch on a large monorepo can timeout leaving the worktree in a bad state.
+//
+// Strategy:
+//   1. hard-reset to the remote-tracking ref (rewrites working tree)
+//   2. clean untracked files
+//   3. create/reset the feature branch at HEAD (metadata-only, no checkout)
+//   4. verify the worktree is clean — if reset was interrupted, fail fast
+//      rather than letting the coder's `git add -A` sweep in partial state.
 async function acquireSlot({ worktreePath, branchDefault, branchName, remote = 'origin' }) {
   try { git('rebase --abort 2>/dev/null', worktreePath); } catch { /* no rebase in progress */ }
-  git('reset --hard', worktreePath);
-  git('clean -fd', worktreePath);
-  // Refresh from the remote and branch off the CURRENT upstream tip rather than
-  // the stale local ref (see freshDefaultBase). -B creates or resets the feature
-  // branch at that tip and checks it out. Unlike the old base (the local ref the
-  // idle slot already sat on, a metadata-only move), the fresh upstream tip can
-  // be far ahead — the checkout then rewrites the whole working tree, which on a
-  // large monorepo is as costly as the initial `worktree add`, so it gets the
-  // longer ADD_TIMEOUT rather than the 5-min default.
-  const base = await freshDefaultBase({ cwd: worktreePath, branchDefault, remote });
-  await gitAsync(`checkout -B ${branchName} ${base}`, worktreePath, ADD_TIMEOUT);
+  const base = freshDefaultBase({ cwd: worktreePath, branchDefault, remote });
+  // Hard-reset rewrites the working tree — can be slow on large repos, so
+  // run it async to keep the event loop responsive.
+  await gitAsync(`reset --hard ${base}`, worktreePath);
+  await gitAsync('clean -fd', worktreePath);
+  // checkout -B with no start-point uses HEAD, which is already at `base`
+  // after the reset — this is a metadata-only branch creation, no checkout.
+  git(`checkout -B ${branchName}`, worktreePath);
+  const status = git('status --porcelain', worktreePath);
+  if (status) {
+    throw new Error(`Worktree not clean after checkout: ${status.slice(0, 200)}`);
+  }
 }
 
 // Return a pool worktree to its idle state: clean, detached at the default

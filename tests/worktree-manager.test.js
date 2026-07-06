@@ -141,10 +141,9 @@ function unloadManager() {
   }
 })();
 
-// ── freshDefaultBase resolves the CURRENT origin tip, not the stale local ref.
-//    This is the base the standalone "rebase" button rebases onto, so a ticket
-//    rebases against latest origin/<default> rather than a drifted local ref. ──
-(async function testFreshDefaultBaseResolvesOriginTip() {
+// ── freshDefaultBase returns the existing remote-tracking ref without fetching.
+//    The stale origin/main from the clone is used directly. ──
+(async function testFreshDefaultBaseReturnsExistingOriginRef() {
   const origin = makeRepo(); // acts as the remote
   const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'jd-mgr-clone-'));
   try {
@@ -155,19 +154,18 @@ function unloadManager() {
 
     const { manager } = loadManager({ numWorktrees: 0, projectDir: clone });
 
-    // Upstream advances after the clone — local main is now stale.
+    // Upstream advances after the clone — local origin/main is now stale.
     fs.writeFileSync(path.join(origin, 'upstream.txt'), 'new upstream work\n');
     sh('git add upstream.txt', origin);
     sh('git commit -q -m "upstream advances"', origin);
-    const originTip = sh('git rev-parse main', origin);
-    const staleLocalTip = sh('git rev-parse main', clone);
-    assert.notStrictEqual(originTip, staleLocalTip, 'precondition: local main is behind origin/main');
+    const staleOriginTip = sh('git rev-parse origin/main', clone); // pre-fetch value
 
-    const base = await manager.freshDefaultBase(clone);
-    assert.strictEqual(base, 'origin/main', 'resolves the remote-tracking ref after fetching');
-    assert.strictEqual(sh(`git rev-parse ${base}`, clone), originTip, 'base points at the fresh origin tip');
+    const base = manager.freshDefaultBase(clone);
+    assert.strictEqual(base, 'origin/main', 'resolves the remote-tracking ref');
+    assert.strictEqual(sh(`git rev-parse ${base}`, clone), staleOriginTip,
+      'base points at the stale origin/main (no fetch)');
 
-    console.log('PASS: freshDefaultBase resolves the fresh origin tip for rebase');
+    console.log('PASS: freshDefaultBase returns the existing origin ref without fetching');
   } finally {
     unloadManager();
     cleanupRepo(origin);

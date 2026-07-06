@@ -143,6 +143,67 @@ function linkedWorktrees(repo) {
   }
 })();
 
+// ── acquireSlot reclaims a dirty worktree (modified, untracked, committed
+//    changes) and leaves it clean on a new feature branch. ──
+(async function testAcquireSlotReclaimsDirtyWorktree() {
+  const repo = makeRepo();
+  const worktreesDir = path.join(repo, '.worktrees');
+  try {
+    pool.provisionPool({ projectDir: repo, worktreesDir, branchDefault: 'main', count: 1 });
+    const wt = path.join(worktreesDir, 'pool-0');
+    const branchName = 'feature/dirty-test';
+
+    // Simulate a previous ticket that did work and partially committed.
+    // 1. Create a committed change (stale feature branch work).
+    await pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName: 'feature/old-ticket' });
+    assert.strictEqual(sh('git rev-parse --abbrev-ref HEAD', wt), 'feature/old-ticket',
+      'precondition: on old feature branch');
+    sh('git commit --allow-empty -m "old committed change"', wt);
+
+    // 2. Uncommitted modification to a tracked file.
+    fs.writeFileSync(path.join(wt, 'README.md'), 'modified content\n');
+    sh('git add README.md', wt); // staged but not committed
+
+    // 3. Another uncommitted modification (unstaged).
+    fs.writeFileSync(path.join(wt, 'unstaged.txt'), 'unstaged change\n');
+
+    // 4. Untracked file.
+    fs.writeFileSync(path.join(wt, 'untracked.txt'), 'new untracked file\n');
+
+    // 5. Verify dirty state is real before acquire.
+    const statusBefore = sh('git status --porcelain', wt);
+    assert.ok(statusBefore, 'precondition: worktree is dirty');
+
+    // Acquire for a new ticket — should reset everything.
+    await pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName });
+
+    // Verify outcome.
+    assert.strictEqual(sh('git rev-parse --abbrev-ref HEAD', wt), branchName,
+      'acquired slot is on the new feature branch');
+    assert.strictEqual(sh('git status --porcelain', wt), '',
+      'acquired slot is clean after reclaiming dirty worktree');
+    assert.ok(!fs.existsSync(path.join(wt, 'untracked.txt')),
+      'untracked files cleaned');
+    assert.ok(!fs.existsSync(path.join(wt, 'unstaged.txt')),
+      'unstaged changes cleaned');
+    // HEAD is at the default branch tip (origin/main or local main fallback),
+    // not the old feature branch commit.
+    const expectedBase = sh('git rev-parse main', repo);
+    assert.strictEqual(sh('git rev-parse HEAD', wt), expectedBase,
+      'HEAD is at the default branch tip, not the old feature branch commit');
+
+    // Stale feature branch from old ticket should still exist (git doesn't
+    // delete branches on checkout -B, it resets the target branch).
+    const branches = sh('git branch', repo);
+    assert.ok(branches.includes('feature/old-ticket'),
+      'old feature branch still exists in repo (not deleted by acquire)');
+
+    console.log('PASS: acquireSlot reclaims a dirty worktree cleanly');
+  } finally {
+    cleanupRepo(repo);
+  }
+})();
+
 // ── isPoolWorktree recognizes only pool-N dirs under worktreesDir ──
 (function testIsPoolWorktree() {
   const worktreesDir = '/tmp/proj/.worktrees';
@@ -154,11 +215,11 @@ function linkedWorktrees(repo) {
   console.log('PASS: isPoolWorktree matches only <worktreesDir>/pool-N');
 })();
 
-// ── acquireSlot bases the feature branch on the FRESH origin tip, not the
-//    stale local default-branch ref. Pool worktrees never fetch on their own,
-//    so the local `main`/`develop` ref drifts behind origin; a new ticket must
-//    still start from the current upstream tip (freshDefaultBase). ──
-(async function testAcquireSlotUsesFreshOriginBase() {
+// ── acquireSlot uses the existing remote-tracking ref directly, without
+//    fetching. The remote-tracking ref (e.g. origin/main) from the previous
+//    fetch is used even if it's slightly stale — avoids fetch timeouts on
+//    large monorepos. ──
+(async function testAcquireSlotUsesExistingOriginRef() {
   const origin = makeRepo(); // acts as the remote
   const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'jd-pool-clone-'));
   try {
@@ -170,27 +231,25 @@ function linkedWorktrees(repo) {
     const worktreesDir = path.join(clone, '.worktrees');
     pool.provisionPool({ projectDir: clone, worktreesDir, branchDefault: 'main', count: 1 });
 
-    // Upstream moves on AFTER the pool was provisioned — the local `main` ref
-    // in the clone is now stale.
+    // Upstream moves on AFTER the pool was provisioned — local origin/main
+    // is now stale, but acquireSlot uses it without fetching.
     fs.writeFileSync(path.join(origin, 'upstream.txt'), 'new upstream work\n');
     sh('git add upstream.txt', origin);
     sh('git commit -q -m "upstream advances"', origin);
-    const originTip = sh('git rev-parse main', origin);
+    const staleOriginTip = sh('git rev-parse origin/main', clone); // pre-fetch value
     const staleLocalTip = sh('git rev-parse main', clone);
-    assert.notStrictEqual(originTip, staleLocalTip,
-      'precondition: local main is behind origin/main');
 
-    // Acquire: freshDefaultBase should fetch and branch off origin/main's tip.
     const wt = path.join(worktreesDir, 'pool-0');
     await pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName: 'feature/fresh' });
 
     const branchBase = sh('git rev-parse HEAD', wt);
-    assert.strictEqual(branchBase, originTip,
-      'acquired feature branch is based on the fresh origin/main tip');
-    assert.notStrictEqual(branchBase, staleLocalTip,
-      'acquired feature branch is NOT based on the stale local main');
+    // Should be based on origin/main as it was (no fetch), not the new origin tip
+    assert.strictEqual(branchBase, staleOriginTip,
+      'acquired feature branch is based on the existing origin/main (no fetch)');
+    assert.strictEqual(branchBase, staleLocalTip,
+      'origin/main matches local main since clone was up-to-date at provision time');
 
-    console.log('PASS: acquireSlot bases the feature branch on the fresh origin tip');
+    console.log('PASS: acquireSlot uses the existing origin ref without fetching');
   } finally {
     cleanupRepo(origin);
     cleanupRepo(clone);

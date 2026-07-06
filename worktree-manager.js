@@ -142,7 +142,7 @@ async function acquire(ticket) {
       // metadata operation that writes a new branch ref and worktree dir. Base
       // off the freshly-fetched upstream tip, not the stale local ref, so a new
       // ticket doesn't start weeks behind origin (see pool.freshDefaultBase).
-      const base = await pool.freshDefaultBase({ cwd: config.projectDir, branchDefault: config.branchDefault });
+      const base = pool.freshDefaultBase({ cwd: config.projectDir, branchDefault: config.branchDefault });
       git(`worktree add -b ${branchName} ${worktreePath} ${base}`, undefined, WORKTREE_ADD_TIMEOUT);
     }
   }
