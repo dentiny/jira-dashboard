@@ -634,6 +634,56 @@ function buildTestContextForPrompt(ticketId) {
   return lines.join('\n');
 }
 
+// ── Post-implement finalizer (commit, diff, transition) ─────
+// Shared between the /implement handler and crash-recovery re-attach.
+async function finishImplement(ticketId, worktreePath, tokensBefore, onProgress) {
+  const ticket = db.getTicket(ticketId);
+
+  const td = coder.getStats();
+  const tokenDelta = tokensBefore
+    ? { cost: (td.cost - tokensBefore.cost).toFixed(3), input: td.input, output: td.output }
+    : { cost: (td.cost - (ticket.token_cost || 0)).toFixed(3), input: td.input, output: td.output };
+  db.updateTicket(ticket.id, {
+    token_cost: parseFloat(tokenDelta.cost), token_input: tokenDelta.input, token_output: tokenDelta.output,
+  });
+  db.logActivity(ticket.id, 'token_usage', JSON.stringify(tokenDelta));
+
+  for (const cmd of [`diff --quiet`, `diff --cached --quiet`]) {
+    try { runGit(cmd, worktreePath); } catch {
+      db.logActivity(ticket.id, 'commit_retry', 'Uncommitted changes — asking coder to commit');
+      await runCoder(ticket.id,
+        `You made changes but didn't commit. Review and commit ALL changes with clear messages. Don't make new changes — only commit what exists.`,
+        { timeout: config.coder.timeouts.command, onProgress });
+      break;
+    }
+  }
+
+  let commitSha = commitWorktreeChanges(worktreePath, ticket.id, `${ticket.id}: implement`);
+  if (!commitSha) {
+    try { commitSha = runGit(`rev-parse HEAD`, worktreePath); } catch {}
+  }
+
+  let diffSummary = '';
+  try { diffSummary = runGit(`log ${resolveDiffBase(worktreePath)}..HEAD --stat`, worktreePath); } catch {}
+  if (!diffSummary) {
+    try { diffSummary = runGit(`diff --stat HEAD`, worktreePath); } catch { diffSummary = '(no diff)'; }
+  }
+
+  const t2 = db.getTicket(ticket.id);
+  if (!t2) return { error: 'Ticket data lost' };
+  const lastRes = (t2.activity || []).find(a => a.action === 'resource');
+  const p = lastRes ? Object.fromEntries(lastRes.detail.split(' ').map(s => s.split('='))) : {};
+  db.updateTicket(ticket.id, {
+    total_cpu: p.cpu || '0', total_elapsed: p.elapsed || '0',
+    commit_sha: commitSha || null, stage: 'review', status: 'idle',
+  });
+  db.logActivity(ticket.id, 'implement_done', diffSummary.slice(0, 500));
+  assertWorktreeClean(ticket, { stage: 'implement' });
+
+  const testRunId = runTicketTests(ticket.id, 'auto');
+  return { success: true, commit_sha: commitSha, diff_summary: diffSummary, test_run_id: testRunId };
+}
+
 // ── Express app ───────────────────────────────────────────
 const app = express();
 app.use(express.json());
@@ -999,76 +1049,21 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
       onProgress,
     });
 
+    clearInterval(fileMonitor);
+
     // Ticket was closed while implementing — stop here, don't commit or
     // transition it back into 'review'.
     if (isClosed(ticket.id)) {
-      clearInterval(fileMonitor);
       return res.json({ closed: true, ticket: db.getTicket(ticket.id) });
     }
 
-    const tokensAfter = coder.getStats();
-    const tokenDelta = {
-      cost: (tokensAfter.cost - tokensBefore.cost).toFixed(3),
-      input: tokensAfter.input,
-      output: tokensAfter.output,
-    };
-    db.updateTicket(ticket.id, {
-      token_cost: parseFloat(tokenDelta.cost),
-      token_input: tokenDelta.input,
-      token_output: tokenDelta.output,
-    });
-    db.logActivity(ticket.id, 'token_usage', JSON.stringify(tokenDelta));
-
-    clearInterval(fileMonitor);
-
-    // Check if the coder actually committed; if not, re-run with a commit-only prompt
-    let hasUncommitted = false;
-    try {
-      runGit(`diff --quiet`, worktreePath);
-    } catch { hasUncommitted = true; }
-    try {
-      runGit(`diff --cached --quiet`, worktreePath);
-    } catch { hasUncommitted = true; }
-    if (hasUncommitted) {
-      db.logActivity(ticket.id, 'commit_retry', 'Coder did not commit — asking again');
-      const commitPrompt = `You implemented changes for this ticket but did not commit them. Review the working directory and commit ALL changes with clear, descriptive messages. Use 'git add' and 'git commit' to create well-structured commits. Do NOT make any new changes — only commit what exists.`;
-      await runCoder(ticket.id, commitPrompt, {
-        timeout: config.coder.timeouts.command,
-        onProgress,
-      });
-    }
-
-    const commitSha = commitWorktreeChanges(worktreePath, ticket.id, `${ticket.id}: implement`);
-
-    let diffSummary = '';
-    try {
-      diffSummary = runGit(`log ${resolveDiffBase(worktreePath)}..HEAD --stat`, worktreePath);
-    } catch {}
-    if (!diffSummary) {
-      try { diffSummary = runGit(`diff --stat HEAD`, worktreePath); } catch { diffSummary = '(no diff)'; }
-    }
-
-    const t2 = db.getTicket(ticket.id);
-    if (!t2) return res.status(500).json({ error: 'Ticket data lost' });
-    const lastRes = (t2.activity || []).find(a => a.action === 'resource');
-    if (lastRes) {
-      const p = Object.fromEntries(lastRes.detail.split(' ').map(s => s.split('=')));
-      db.updateTicket(ticket.id, {
-        total_cpu: p.cpu || '0', total_elapsed: p.elapsed || '0',
-        commit_sha: commitSha || null, stage: 'review', status: 'idle',
-      });
-    } else {
-      db.updateTicket(ticket.id, { commit_sha: commitSha || null, stage: 'review', status: 'idle' });
-    }
-    db.logActivity(ticket.id, 'implement_done', diffSummary.slice(0, 500));
-    assertWorktreeClean(ticket, { stage: 'implement' });
-
-    const testRunId = runTicketTests(ticket.id, 'auto');
+    const result = await finishImplement(ticket.id, worktreePath, tokensBefore, onProgress);
 
     res.json({
-      success: true, worktree_path: worktreePath, branch_name: branchName,
-      diff_summary: diffSummary, output_summary: output.slice(-1000),
-      test_run_id: testRunId, ticket: db.getTicket(ticket.id),
+      ...result,
+      worktree_path: worktreePath, branch_name: branchName,
+      output_summary: output.slice(-1000),
+      ticket: db.getTicket(ticket.id),
     });
   } catch (err) {
     clearInterval(fileMonitor);
@@ -1687,6 +1682,10 @@ app.post('/api/suggestions/:id/dismiss', (req, res) => {
         continue;
       }
 
+      // Tickets running a coder session (clarify, implement, rebase) spawn
+      // the child `detached`, so the process survives a server restart and
+      // the session may still be alive. If it is, re-attach and finish the
+      // implementation; otherwise reset to idle so the user can retry.
       let alive = false;
       if (t.ocode_session) {
         try {
@@ -1697,11 +1696,32 @@ app.post('/api/suggestions/:id/dismiss', (req, res) => {
           alive = sessions.includes(t.ocode_session);
         } catch {}
       }
-      if (!alive) {
-        db.updateTicketField(tid, 'status', 'idle');
-        db.logActivity(tid, 'recovered', 'Server restarted — previous coder session gone, reset to idle');
+      if (alive && t.stage === 'implementation') {
+        db.logActivity(tid, 'recovered', `Server restarted — re-attaching to live session ${t.ocode_session}`);
         changed = true;
-        console.log(`Recovered: ${tid} reset to idle (session not alive)`);
+        console.log(`Recovered: ${tid} session alive — re-attaching`);
+        (async () => {
+          try {
+            await runCoder(tid, 'Continue implementing this ticket. The server was restarted but your session survived. Pick up where you left off.', {
+              timeout: config.coder.timeouts.implement,
+            });
+            if (t.worktree_path && db.getTicket(tid)?.stage !== 'done') {
+              await finishImplement(tid, t.worktree_path);
+            }
+          } catch (err) {
+            db.logActivity(tid, 'recover_error', `Re-attach failed: ${err.message}`);
+            db.updateTicketField(tid, 'status', 'idle');
+            console.log(`Recovered: ${tid} re-attach failed — reset to idle`);
+          }
+        })();
+      } else {
+        const reason = alive
+          ? `session alive but stage is ${t.stage} — not resumable`
+          : 'previous coder session gone';
+        db.updateTicketField(tid, 'status', 'idle');
+        db.logActivity(tid, 'recovered', `Server restarted — ${reason}, reset to idle`);
+        changed = true;
+        console.log(`Recovered: ${tid} reset to idle (${reason})`);
       }
     }
   }
