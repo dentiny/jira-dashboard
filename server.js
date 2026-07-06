@@ -133,6 +133,7 @@ async function pushAndOpenPr(ticketId, branchName, title, worktreePath) {
 
     if (ticketGone(ticketId)) return;
     db.updateTicket(ticketId, { stage: 'done', status: 'idle', pr_url: prUrl });
+    worktrees.release(ticketId);
   } catch (err) {
     if (ticketGone(ticketId)) return;
     db.logActivity(
@@ -1193,6 +1194,7 @@ app.post('/api/suggestions/:id/dismiss', (req, res) => {
           } catch {}
         }
         db.updateTicket(tid, { stage: 'done', status: 'idle' });
+        worktrees.release(tid);
         db.logActivity(tid, 'recovered', 'Server restarted after branch push — finalized to done (branch already on origin).');
         changed = true;
         console.log(`Recovered: ${tid} finalized to done (push completed before restart)`);

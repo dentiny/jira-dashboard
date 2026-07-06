@@ -81,7 +81,7 @@ function ensureWorktreesDir() {
 function acquirePoolSlot(ticket, branchName) {
   const claimed = new Set(
     db.getAllTickets()
-      .filter((t) => t.id !== ticket.id && t.worktree_path)
+      .filter((t) => t.id !== ticket.id && t.worktree_path && t.stage !== 'done')
       .map((t) => path.resolve(t.worktree_path))
   );
   for (const wt of pool.poolPaths(config.worktreesDir, config.numWorktrees)) {
