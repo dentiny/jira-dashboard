@@ -1419,7 +1419,7 @@ app.post('/api/tickets/:id/close', (req, res) => {
   // 2. Mark terminal BEFORE releasing the worktree. A handler whose coder
   //    process we just killed will resume in its catch block; seeing the
   //    closed stage (via isClosed) it bails instead of reopening the ticket.
-  db.updateTicket(ticket.id, { stage: 'done', status: 'idle' });
+  db.updateTicket(ticket.id, { stage: 'done', status: 'idle', commit_sha: null, pr_url: null });
 
   // 3. Release the worktree / pool slot and branch (safe when there is none).
   worktrees.release(ticket.id);

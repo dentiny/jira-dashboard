@@ -1650,18 +1650,18 @@ export default function App() {
                             <ExternalLink className="h-3 w-3" />
                           </a>
                           {' · Commit '}
-                          <code className="t-mono-12 text-emerald-800">{sel.commit_sha || 'N/A'}</code>
+                          <code className="t-mono-12 text-emerald-800">{sel.commit_sha}</code>
                         </div>
                       </div>
-                    ) : (
+                    ) : sel.commit_sha ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3.5 flex items-start gap-2.5">
                         <Check className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
                         <div className="t-body text-emerald-900">
                           Merged into main · Commit{' '}
-                          <code className="t-mono-12 text-emerald-800">{sel.commit_sha || 'N/A'}</code>
+                          <code className="t-mono-12 text-emerald-800">{sel.commit_sha}</code>
                         </div>
                       </div>
-                    )}
+                    ) : null}
                     {sel.plan && (
                       <Section
                         title="Implementation Plan"
