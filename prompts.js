@@ -12,7 +12,7 @@ const prompts = {
 Write your structured output to the file specified in the context. The file must contain valid JSON conforming to: ${PDIR}/.jira-dashboard/clarification.schema.json
 
 - When skipping questions: set "ready" to true, provide a "plan", and set "questions" to an empty array.
-- When asking questions: set "ready" to false and include 3-5 clarifying questions.
+- When asking questions: set "ready" to false and include up to 5 clarifying questions. Keep questions focused on the most critical unknowns — the ticketing system will call you again for another round after the user answers, so you can build on prior answers iteratively rather than covering everything at once.
 - Use the Write tool to write the JSON to the output file.
 - Do NOT output the JSON in your response — only write it to the file.`,
 
@@ -80,7 +80,15 @@ Output ONLY valid JSON — no markdown, no explanation, no code fences:
   "notes": "Optional: why these questions matter"
 }`,
 
-  clarifyPR: `A PR for this ticket has issues that need attention. Do NOT re-ask the original implementation questions. Focus only on resolving the PR issues listed below. If you can fix them directly, provide a plan and proceed to implementation. If you need clarification about the issues themselves, ask about those specifically.
+  clarifyPR: `A PR for this ticket has issues that need attention. Do NOT re-ask the original implementation questions.
+
+CRITICAL: Only address the actionable failures listed below (FAILURE/ERROR checks that require code changes). Explicitly IGNORE any checks marked as "ignore" — they are pending, non-actionable, or require human intervention (approvals, release notes, etc.) and are outside your scope.
+
+CRITICAL: Do NOT use the \`gh\` CLI or any GitHub API. Do NOT attempt to modify PR descriptions, labels, reviewers, or any GitHub metadata. You are only allowed to edit code and commit locally — same as a regular implementation ticket.
+
+CRITICAL: Continue working on the current branch. Your previous session context (the implementation plan, code written, and your reasoning) is preserved — use it to understand what was already done and what needs to change. Do NOT re-implement from scratch or create a new branch.
+
+Focus only on resolving the PR issues listed below. If you can fix them directly via code changes, provide a plan and proceed to implementation. If you need clarification about the issues themselves, ask about those specifically.
 
 Write your structured output to the file specified in the context. The file must contain valid JSON conforming to: ${PDIR}/.jira-dashboard/clarification.schema.json
 

@@ -538,11 +538,26 @@ function ResourceMetrics({
   const cpuPct = Math.min(rate / cores * 100, 100)
   const peakMem = Math.max(...r.map(e => parseFloat(p(e.detail).mem) || 0), mem)
   const memPct = Math.min((mem / (peakMem || 1)) * 100, 100)
-  // Baseline (oldest entry) for per-stage delta
-  const base = r.length > 1 ? p(r[r.length - 1].detail) : null
-  const deltaTokensIn = Math.max(0, parseToken(cur?.tokens_in) - parseToken(base?.tokens_in))
-  const deltaTokensOut = Math.max(0, parseToken(cur?.tokens_out) - parseToken(base?.tokens_out))
-  const deltaCost = Math.max(0, parseCost(cur?.cost) - parseCost(base?.cost))
+  // Find the baseline resource event from BEFORE the current run started.
+  // Run-start markers in the activity log separate runs; the resource event
+  // immediately after (older than) the most recent marker is the last sample
+  // from the previous run.  The delta from that baseline to the current event
+  // gives cost/tokens for just this run, excluding global opencode stats.
+  const runStartMarkers = new Set(['answer_process', 'implement_start', 'pr_tasks_start', 'continued'])
+  let liveBaseline = null
+  const act = activity || []
+  const startIdx = act.findIndex(a => runStartMarkers.has(a.action))
+  if (startIdx >= 0) {
+    for (let i = startIdx + 1; i < act.length; i++) {
+      if (act[i].action === 'resource') { liveBaseline = p(act[i].detail); break }
+    }
+  }
+  // Fall back to the oldest resource entry when there's no start marker
+  // (e.g. first ever run — bucket everything).
+  if (!liveBaseline && r.length > 1) liveBaseline = p(r[r.length - 1].detail)
+  const liveTokensIn = liveBaseline ? Math.max(0, parseToken(cur?.tokens_in) - parseToken(liveBaseline?.tokens_in)) : (parseToken(cur?.tokens_in) || 0)
+  const liveTokensOut = liveBaseline ? Math.max(0, parseToken(cur?.tokens_out) - parseToken(liveBaseline?.tokens_out)) : (parseToken(cur?.tokens_out) || 0)
+  const liveCost = liveBaseline ? Math.max(0, parseCost(cur?.cost) - parseCost(liveBaseline?.cost)) : (parseCost(cur?.cost) || 0)
 
   const renderBucket = (label: string, s: S | null) => {
     if (!s || s.cpu === 0) return null
@@ -591,8 +606,8 @@ function ResourceMetrics({
             <MetricCompact label="Memory"   value={`${mem.toFixed(0)} MB`} />
             <MetricCompact label="Threads"  value={cur?.threads || '—'} />
             <MetricCompact label="Elapsed"  value={`${el}s`} />
-            {cur?.tokens_in && <MetricCompact label="Tokens" value={`${fmtToken(parseToken(cur?.tokens_in))} in · ${fmtToken(parseToken(cur?.tokens_out))} out`} />}
-            {cur?.cost && <MetricCompact label="Cost" value={fmtCost(parseCost(cur?.cost))} />}
+            {liveTokensIn > 0 && <MetricCompact label="Tokens" value={`${fmtToken(liveTokensIn)} in · ${fmtToken(liveTokensOut)} out`} />}
+            {liveCost > 0 && <MetricCompact label="Cost" value={fmtCost(liveCost)} />}
             {cpuPct !== undefined && (
               <div className="col-span-2">
                 <div className="flex items-baseline justify-between t-meta text-ink-2 uppercase tracking-wider font-medium">
@@ -868,7 +883,7 @@ export default function App() {
             }
             lastUpd.current = f.updated_at
             setTickets(p => p.map(x => (x.id === id ? f : x)))
-            setSel(f)
+            setSel(p => p && p.id === id ? f : p)
           }
         } catch {}
       })
@@ -1445,7 +1460,7 @@ export default function App() {
                     <ResourceMetrics activity={sel.activity || []} stageResources={sel.stage_resources} status={sel.status} />
                     {stdoutLines.length > 0 && (
                       <div className="mt-3 rounded-md ring-1 ring-border bg-zinc-950 text-ink-3 p-3 max-h-64 overflow-y-auto t-mono-12 leading-relaxed whitespace-pre-wrap break-words">
-                        {stdoutLines.map((l, i) => <div key={i}>{l}</div>)}
+                        {stdoutLines.join('')}
                       </div>
                     )}
                   </Section>
@@ -1510,7 +1525,7 @@ export default function App() {
                         </div>
                         {stdoutLines.length > 0 && (
                           <div className="mt-3 rounded-md ring-1 ring-border bg-zinc-950 text-ink-3 p-3 max-h-64 overflow-y-auto t-mono-12 leading-relaxed whitespace-pre-wrap break-words">
-                            {stdoutLines.map((l, i) => <div key={i}>{l}</div>)}
+                            {stdoutLines.join('')}
                           </div>
                         )}
                         {todoItems.length > 0 && (
@@ -1551,10 +1566,7 @@ export default function App() {
                       </Section>
                     ) : (
                       <div className="rounded-lg border border-dashed border-border p-6 text-center">
-                        <p className="t-body text-ink-2 mb-3">Ready to implement.</p>
-                        <Btn onClick={() => impl(sel.id)}>
-                          Start Implementation <ArrowRight className="h-3.5 w-3.5" />
-                        </Btn>
+                        <p className="t-body text-ink-2">Ready to implement.</p>
                       </div>
                     )}
                   </>
@@ -1576,7 +1588,7 @@ export default function App() {
                         </div>
                         {stdoutLines.length > 0 && (
                           <div className="mt-3 rounded-md ring-1 ring-border bg-zinc-950 text-ink-3 p-3 max-h-64 overflow-y-auto t-mono-12 leading-relaxed whitespace-pre-wrap break-words">
-                            {stdoutLines.map((l, i) => <div key={i}>{l}</div>)}
+                            {stdoutLines.join('')}
                           </div>
                         )}
                       </Section>
@@ -1822,7 +1834,7 @@ export default function App() {
                 {/* PR tasks console output */}
                 {sel.stage === 'pr_opened' && stdoutLines.length > 0 && (
                   <div className="mt-3 rounded-md ring-1 ring-border bg-zinc-950 text-ink-3 p-3 max-h-64 overflow-y-auto t-mono-12 leading-relaxed whitespace-pre-wrap break-words">
-                    {stdoutLines.map((l, i) => <div key={i}>{l}</div>)}
+                    {stdoutLines.join('')}
                   </div>
                 )}
 
@@ -1869,6 +1881,11 @@ export default function App() {
                   </Btn>
                 )}
               </>
+            )}
+            {sel.stage === 'implementation' && sel.status !== 'running' && (
+              <Btn onClick={() => impl(sel.id)}>
+                Start Implementation <ArrowRight className="h-3.5 w-3.5" />
+              </Btn>
             )}
             {sel.stage === 'pr_opened' && sel.status !== 'running' && cfg.mergeStrategy === 'pr' && !!sel.pr_tasks_only && (
               <Btn variant="secondary" onClick={() => handlePrTasks(sel.id)}>

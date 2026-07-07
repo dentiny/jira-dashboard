@@ -130,11 +130,12 @@ function run(prompt, opts = {}) {
         } else {
           resolve(parsed);
         }
-      } else if (parsed.text) {
+      } else if (code !== null && parsed.text) {
         resolve(parsed);
+      } else if (code === null) {
+        reject(new Error(`Coder killed (signal/timeout): ${(parsed.text || stderr || '').slice(-500)}`));
       } else {
-        const reason = code === null ? 'killed (signal/timeout)' : `exited ${code}`;
-        reject(new Error(`Coder ${reason}: ${stderr.slice(-500)}`));
+        reject(new Error(`Coder exited ${code}: ${stderr.slice(-500)}`));
       }
     });
 

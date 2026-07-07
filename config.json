@@ -13,7 +13,7 @@
     "type": "opencode",
     "bin": "opencode",
     "timeouts": {
-      "clarify": 180000,
+      "clarify": 600000,
       "implement": 600000,
       "suggest": 120000,
       "test": 300000,
