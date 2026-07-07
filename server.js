@@ -509,6 +509,8 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
   try {
     db.logActivity(ticket.id, 'pr_tasks_start');
     db.updateTicketField(ticket.id, 'status', 'running');
+    // Start fresh — don't reuse prior session so --dangerously-skip-permissions applies
+    db.updateTicketField(ticket.id, 'ocode_session', null);
     const onProgress = (line) => {
       if (line.startsWith('[resource] ')) {
         const detail = line.slice(11);
