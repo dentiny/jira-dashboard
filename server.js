@@ -333,9 +333,7 @@ app.post('/api/tickets/:id/clarify', async (req, res) => {
     ticket.review_feedback && { title: fbTitle1, body: ticket.review_feedback },
   ].filter(Boolean));
 
-  const isPrFeedback = !!ticket.review_feedback?.match(/^PR #\d+/);
-  const extraNote = isPrFeedback ? '\n\nIMPORTANT: The ticket was moved back to clarification due to PR issues listed above. You MUST ask clarifying questions about each issue — do NOT skip to implementation. This is a new clarification round.' : '';
-  const prompt = `${prompts.clarify}\n\nRead full ticket context at: ${contextFile}${extraNote}`;
+  const prompt = `${prompts.clarify}\n\nRead full ticket context at: ${contextFile}`;
 
   try {
     db.logActivity(ticket.id, 'clarify_start');
