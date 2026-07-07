@@ -822,36 +822,41 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
       } catch {}
     }
 
-    if (!hasChanges) {
+    if (!hasChanges && config.mergeStrategy !== 'pr') {
       const msg = `No uncommitted changes and no commits ahead of ${config.branchDefault} on this branch.`;
       db.logActivity(ticket.id, 'no_changes', msg);
       return res.status(409).json({ error: msg, ticket: db.getTicket(ticket.id) });
     }
 
-    const commitMsg = `${ticket.id}: ${ticket.title}`;
-    runGit(`add -A`, ticket.worktree_path);
+    // PR strategy: no new commit needed if worktree is clean — the coder's
+    // commits are already on the branch. Just push and create/update the PR.
+    if (config.mergeStrategy === 'pr' && !hasChanges) {
+      commitSha = runGit(`rev-parse HEAD`, ticket.worktree_path);
+    } else {
+      const commitMsg = `${ticket.id}: ${ticket.title}`;
+      runGit(`add -A`, ticket.worktree_path);
 
-    // PR strategy preserves branch history (e.g. multiple commits or an existing
-    // PR branch).  Other strategies squash into a single commit for clean
-    // cherry-pick / merge into the default branch.
-    if (config.mergeStrategy !== 'pr') {
-      const baseSha = ticket.base_sha;
-      if (baseSha) {
-        try {
-          runGit(`reset --soft ${baseSha}`, ticket.worktree_path);
-          db.logActivity(ticket.id, 'squashed', `All commits squashed to base ${baseSha.slice(0, 7)}`);
-        } catch {
-          db.logActivity(ticket.id, 'squash_skipped', 'Could not reset to recorded base, committing as-is');
+      // PR strategy preserves branch history. Other strategies squash into
+      // a single commit for clean cherry-pick / merge.
+      if (config.mergeStrategy !== 'pr') {
+        const baseSha = ticket.base_sha;
+        if (baseSha) {
+          try {
+            runGit(`reset --soft ${baseSha}`, ticket.worktree_path);
+            db.logActivity(ticket.id, 'squashed', `All commits squashed to base ${baseSha.slice(0, 7)}`);
+          } catch {
+            db.logActivity(ticket.id, 'squash_skipped', 'Could not reset to recorded base, committing as-is');
+          }
+        } else {
+          db.logActivity(ticket.id, 'squash_skipped', 'No base_sha recorded — committing as-is');
         }
-      } else {
-        db.logActivity(ticket.id, 'squash_skipped', 'No base_sha recorded — committing as-is');
       }
-    }
 
-    runGit(`commit -m "${escShell(commitMsg)}"`, ticket.worktree_path);
-    commitSha = runGit(`rev-parse HEAD`, ticket.worktree_path);
-    db.logActivity(ticket.id, 'committed', commitSha);
-    assertWorktreeClean(ticket, { stage: 'cherry-pick' });
+      runGit(`commit -m "${escShell(commitMsg)}"`, ticket.worktree_path);
+      commitSha = runGit(`rev-parse HEAD`, ticket.worktree_path);
+      db.logActivity(ticket.id, 'committed', commitSha);
+      assertWorktreeClean(ticket, { stage: 'cherry-pick' });
+    }
 
     if (config.mergeStrategy === 'pr') {
       // Push + PR creation runs in the background — a slow local pre-push hook
