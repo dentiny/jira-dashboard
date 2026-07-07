@@ -1297,4 +1297,80 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   Coder: ${config.coder.type} (${config.coder.bin})`);
   console.log(`   Data: SQLite at ${path.join(DATA_DIR, 'store.db')}`);
   if (suggestions.length < SUGGESTIONS_MAX) generateSuggestions();
+
+  // ── Periodic PR checker ─────────────────────────────────
+  // Every 5 minutes, scan pr_opened tickets for new CI failures
+  // or review comments.  When found, move back to clarification
+  // with a summary so the coder can address them.
+  const PR_CHECK_INTERVAL = 300_000; // 5 min
+  const prStates = new Map(); // ticketId → state hash
+
+  async function checkPRs() {
+    const ids = db.getTicketIds();
+    for (const tid of ids) {
+      const t = db.getTicket(tid);
+      if (!t || t.stage !== 'pr_opened' || !t.pr_url) continue;
+
+      const m = t.pr_url.match(/\/pull\/(\d+)/);
+      if (!m) continue;
+
+      let json;
+      try {
+        const { exec } = require('child_process');
+        json = await new Promise((res, rej) => {
+          exec(`gh pr view ${m[1]} --json state,reviews,comments,statusCheckRollup`,
+            { cwd: config.projectDir, timeout: 15000 },
+            (err, out) => err ? rej(err) : res(out));
+        });
+      } catch { continue; }
+
+      const pr = JSON.parse(json);
+      if (pr.state !== 'OPEN') continue;
+
+      // Collect actionable items
+      const failures = (pr.statusCheckRollup || []).filter(
+        s => s.state === 'FAILURE' || s.state === 'ERROR');
+
+      const changeRequested = (pr.reviews || []).filter(
+        r => r.state === 'CHANGES_REQUESTED');
+
+      const newComments = (pr.comments || []).filter(c => {
+        if (c.isMinimized) return false;
+        if (c.author?.login === 'nuro-ci') return false;
+        return true;
+      });
+
+      if (failures.length === 0 && changeRequested.length === 0 && newComments.length === 0) continue;
+
+      // Build a state signature to avoid re-triggering
+      const sig = JSON.stringify({ failures, changeRequested, newComments });
+      const prev = prStates.get(tid);
+      if (prev === sig) continue;
+      prStates.set(tid, sig);
+
+      // Build summary
+      const parts = [`PR #${m[1]} needs attention:`];
+      for (const f of failures) {
+        const link = f.targetUrl ? ` (${f.targetUrl})` : '';
+        parts.push(`  • ${f.context} — ${f.state}${link}`);
+      }
+      for (const r of changeRequested) {
+        parts.push(`  • Review by ${r.author?.login || 'someone'} requests changes`);
+      }
+      for (const c of newComments) {
+        const body = c.body?.replace(/\n/g, ' ').slice(0, 120) || '';
+        parts.push(`  • Comment from ${c.author?.login || 'someone'}: "${body}"`);
+      }
+
+      const summary = parts.join('\n');
+      db.updateTicket(tid, { stage: 'clarification', review_feedback: summary, plan: null, status: 'idle' });
+      db.logActivity(tid, 'pr_feedback', `Moved to clarification:\n${summary}`);
+      sseBroadcast(tid, 'ticket', db.getTicket(tid));
+      console.log(`[pr-check] ${tid} moved to clarification — PR #${m[1]} has new activity`);
+    }
+  }
+
+  setInterval(checkPRs, PR_CHECK_INTERVAL);
+  // Also run once shortly after startup
+  setTimeout(checkPRs, 10_000);
 });
