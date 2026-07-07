@@ -71,9 +71,9 @@ type Sug = { id: string; title: string; content: string }
    Stage vocabulary — single source of truth.
    Order in the board, label, color, accent dot.
    ───────────────────────────────────────────────────────── */
-type Stage = 'clarification' | 'implementation' | 'review' | 'done'
+type Stage = 'clarification' | 'implementation' | 'review' | 'pr_opened' | 'done'
 
-const STAGES: Stage[] = ['clarification', 'implementation', 'review', 'done']
+const STAGES: Stage[] = ['clarification', 'implementation', 'review', 'pr_opened', 'done']
 
 const STAGE_META: Record<Stage, { label: string; dot: string; pill: string }> = {
   clarification: {
@@ -90,6 +90,11 @@ const STAGE_META: Record<Stage, { label: string; dot: string; pill: string }> = 
     label: 'Review',
     dot:   'bg-violet-500',
     pill:  'bg-violet-50 text-violet-700 ring-1 ring-violet-200/70',
+  },
+  pr_opened: {
+    label: 'PR Opened',
+    dot:   'bg-emerald-500',
+    pill:  'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70',
   },
   done: {
     label: 'Done',
@@ -722,7 +727,7 @@ export default function App() {
       const changed: string[] = []
       for (const t of d.tickets) {
         const old = prev.get(t.id)
-        if (old && old.status === 'running' && t.status === 'idle' && old.stage !== t.stage && (t.stage === 'review' || t.stage === 'clarification' || t.stage === 'done')) changed.push(t.id)
+        if (old && old.status === 'running' && t.status === 'idle' && old.stage !== t.stage && (t.stage === 'review' || t.stage === 'clarification' || t.stage === 'pr_opened' || t.stage === 'done')) changed.push(t.id)
       }
       prevTicketsRef.current = new Map(d.tickets.map(t => [t.id, t]))
       if (changed.length > 0) {
@@ -1111,7 +1116,7 @@ export default function App() {
 
   /* Group tickets by stage once */
   const byStage = useMemo(() => {
-    const m: Record<Stage, T[]> = { clarification: [], implementation: [], review: [], done: [] }
+    const m: Record<Stage, T[]> = { clarification: [], implementation: [], review: [], pr_opened: [], done: [] }
     for (const t of tickets) {
       if (t.stage in m) (m as any)[t.stage].push(t)
     }
@@ -1629,8 +1634,8 @@ export default function App() {
                   </>
                 )}
 
-                {/* Done */}
-                {sel.stage === 'done' && (
+                {/* Done / PR Opened */}
+                {(sel.stage === 'done' || sel.stage === 'pr_opened') && (
                   <>
                     {cfg.mergeStrategy === 'pr' && resolvePrUrl(sel) ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3.5 flex items-start gap-2.5">
@@ -1722,7 +1727,7 @@ export default function App() {
                   </>
                 )}
 
-                {sel.stage === 'done' && cfg.mergeStrategy === 'pr' && resolvePrUrl(sel) && (
+                {(sel.stage === 'done' || sel.stage === 'pr_opened') && cfg.mergeStrategy === 'pr' && resolvePrUrl(sel) && (
                   <div className="rounded-lg border border-border bg-surface-3 p-3.5 flex items-start gap-2.5">
                     <GitPullRequest className="h-4 w-4 text-ink-3 mt-0.5 shrink-0" />
                     <div className="t-body text-ink-2">

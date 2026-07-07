@@ -8,6 +8,7 @@ const STAGE_LABELS = {
   implementation: 'Implementation',
   review: 'Review',
   ready: 'Ready',
+  pr_opened: 'PR Opened',
   done: 'Done'
 };
 

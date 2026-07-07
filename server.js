@@ -134,7 +134,7 @@ async function pushAndOpenPr(ticketId, branchName, title, worktreePath) {
     }
 
     if (ticketGone(ticketId)) return;
-    db.updateTicket(ticketId, { stage: 'done', status: 'idle', pr_url: prUrl });
+    db.updateTicket(ticketId, { stage: 'pr_opened', status: 'idle', pr_url: prUrl });
     await worktrees.release(ticketId);
   } catch (err) {
     if (ticketGone(ticketId)) return;
@@ -217,7 +217,7 @@ app.get('/api/config', (req, res) => {
 // ── List all tickets ──────────────────────────────────────
 app.get('/api/tickets', (req, res) => {
   const tickets = db.getAllTickets();
-  res.json({ tickets, stages: ['clarification', 'implementation', 'review', 'ready', 'done'], stageLabels: STAGE_LABELS });
+  res.json({ tickets, stages: ['clarification', 'implementation', 'review', 'ready', 'pr_opened', 'done'], stageLabels: STAGE_LABELS });
 });
 
 // ── Get single ticket (with resources) ────────────────────
@@ -228,7 +228,7 @@ async function getTicketResponse(id) {
   const latestTest = db.getLatestTestRun(id);
   const behindCount = getBranchStaleness(t.worktree_path);
   let pr_state = null;
-  if (t.pr_url && t.stage === 'done') {
+  if (t.pr_url && (t.stage === 'pr_opened' || t.stage === 'done')) {
     const m = t.pr_url.match(/\/pull\/(\d+)/);
     if (m) {
       try {

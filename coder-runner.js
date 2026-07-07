@@ -45,7 +45,8 @@ function killTicketProcess(ticketId, pgid, sessionId) {
 }
 
 function isClosed(ticketId) {
-  return db.getTicket(ticketId)?.stage === 'done';
+  const stage = db.getTicket(ticketId)?.stage;
+  return stage === 'done' || stage === 'pr_opened';
 }
 
 function ticketGone(ticketId) {
