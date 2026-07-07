@@ -1210,9 +1210,9 @@ export default function App() {
           </div>
         )}
 
-        {/* ── Board ── */}
+        {/* ── Board: active stages ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5">
-          {STAGES.map(stage => {
+          {STAGES.filter(s => s !== 'done').map(stage => {
             const items = byStage[stage]
             const meta = STAGE_META[stage]
             return (
@@ -1240,6 +1240,36 @@ export default function App() {
             )
           })}
         </div>
+
+        {/* ── Board: done row ── */}
+        {(() => {
+          const items = byStage.done
+          const meta = STAGE_META.done
+          return (
+            <section className="mt-3 sm:mt-5">
+              <header className="flex items-center justify-between mb-2.5 px-1">
+                <div className="flex items-center gap-2">
+                  <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                  <h3 className="t-meta font-semibold text-ink-2 uppercase tracking-wider">
+                    {meta.label}
+                  </h3>
+                </div>
+                <span className="t-meta text-ink-3 bg-surface-3 px-1.5 py-0.5 rounded">
+                  {items.length}
+                </span>
+              </header>
+              {items.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border py-8 text-center t-small text-ink-3">
+                  No tickets
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-5">
+                  {items.map(t => <TicketCard key={t.id} t={t} onOpen={open} loading={loadingId === t.id} highlighted={highlightedIds.has(t.id)} />)}
+                </div>
+              )}
+            </section>
+          )
+        })()}
       </main>
 
       {/* ── Ticket popup ── */}
