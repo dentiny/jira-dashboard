@@ -363,7 +363,7 @@ async function runClarify(ticketId) {
   }
 
   // Validate against the clarification schema
-  if (!parsed) throw new Error('Coder output did not match the expected clarification schema');
+  if (!parsed) throw new Error('Coder response was not valid JSON');
   let schema;
   try {
     schema = JSON.parse(fs.readFileSync(
@@ -371,7 +371,8 @@ async function runClarify(ticketId) {
   } catch { /* skip validation if schema file not found */ }
   if (schema) {
     const ajv = new Ajv();
-    if (!ajv.validate(schema, parsed)) throw new Error(ajv.errorsText());
+    if (!ajv.validate(schema, parsed)) throw new Error(
+      `Clarification schema validation failed: ${ajv.errorsText()}. Click Clarify to retry.`);
   }
 
   const questions = parsed.questions || [];
