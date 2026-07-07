@@ -98,6 +98,7 @@ function startPrChecker(db, config, sseBroadcast) {
         parts.push(`  • Comment from ${c.author?.login || 'someone'}: "${body}"`);
       }
       const summary = parts.join('\n');
+      db.deleteQuestionsForTicket(tid);
       db.updateTicket(tid, { stage: 'clarification', review_feedback: summary, plan: null, status: 'idle', pr_tasks_only: 0 });
       db.logActivity(tid, 'pr_feedback', `Moved to clarification:\n${summary}`);
     }
