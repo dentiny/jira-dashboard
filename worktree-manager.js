@@ -91,9 +91,9 @@ async function acquirePoolSlot(ticket, branchName) {
     try {
       ({ baseSha } = await pool.acquireSlot({ worktreePath: wt, branchDefault: config.branchDefault, branchName }));
     } catch (e) {
-      console.log(`[acquirePoolSlot] ${ticket.id} slot ${wt} FAILED: ${e.message.slice(0, 200)}`);
+      console.log(`[acquirePoolSlot] ${ticket.id} slot ${wt} FAILED: ${e.message}`);
       db.logActivity(ticket.id, 'worktree_acquire_warn',
-        `slot ${wt} failed to prep: ${e.message.slice(0, 120)}`);
+        `slot ${wt} failed to prep: ${e.message.slice(0, 500)}`);
       continue; // corrupt slot — try the next one
     }
     return { worktreePath: wt, branchName, baseSha };
@@ -116,6 +116,15 @@ async function acquire(ticket) {
     if (pool.isValidWorktree(ticket.worktree_path) && ticket.branch_name) {
       worktreePath = ticket.worktree_path;
       console.log(`[acquire] ${ticket.id} reusing existing worktree ${worktreePath} branch=${ticket.branch_name}`);
+      // Ensure the worktree is on the expected branch — it may have drifted
+      // (e.g. the slot was re-assigned to another ticket, or a manual git
+      // checkout changed branches). Use plain checkout (no -B) to preserve
+      // existing commits on the branch.
+      try {
+        git(`checkout ${ticket.branch_name}`, worktreePath);
+      } catch {
+        git(`checkout -b ${ticket.branch_name}`, worktreePath);
+      }
     } else {
       console.log(`[acquire] ${ticket.id} acquiring new pool slot...`);
       const slot = await acquirePoolSlot(ticket, branchName);

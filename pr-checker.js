@@ -3,6 +3,7 @@ const { exec } = require('child_process');
 function startPrChecker(db, config, sseBroadcast, runClarify) {
   const INTERVAL = 180_000; // 3 min
   const prStates = new Map(); // ticketId → state hash
+  const watched = new Set();   // ticketIds that have an active setInterval
 
   async function checkTicket(tid) {
     const t = db.getTicket(tid);
@@ -64,40 +65,50 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
 
     const sig = JSON.stringify({ actionableFailures, showItems, changeRequested, newComments });
     const prev = prStates.get(tid);
-    if (prev === sig) return;
+    if (prev === sig) {
+      db.updateTicketField(tid, 'updated_at', new Date().toISOString());
+      return;
+    }
     prStates.set(tid, sig);
 
-    const addrs = actionableFailures.length + changeRequested.length + newComments.length;
+    const needsMove = actionableFailures.length > 0 || changeRequested.length > 0;
     const parts = [];
-    if (addrs === 0) {
-      // Only show items (pending + non-actionable) → stay in pr_opened, flag for Address PR
+    if (!needsMove) {
+      // Only show items (pending, non-actionable, comments) → stay in pr_opened, flag for Address PR
       for (const f of showItems) {
         const link = f.targetUrl ? ` (${f.targetUrl})` : '';
         parts.push(`  • ${f.context} — ${f.state}${link}`);
+      }
+      if (newComments.length > 0) {
+        parts.push(`  • ${newComments.length} new comment(s) on the PR`);
       }
       const summary = parts.join('\n');
       const header = `PR #${m[1]} has tasks that need attention:\n`;
       db.updateTicket(tid, { review_feedback: header + summary, pr_tasks_only: 1 });
       db.logActivity(tid, 'pr_feedback', `PR tasks set on ${tid}:\n${header}${summary}`);
     } else {
-      // Has actionable items → move to clarification
-      parts.push(`PR #${m[1]} needs attention:`);
+      // Has actionable failures or change requests → move to clarification
+      const summaryParts = [`PR #${m[1]} — actionable failures to fix (code may need changes):`];
       for (const f of actionableFailures) {
         const link = f.targetUrl ? ` (${f.targetUrl})` : '';
-        parts.push(`  • ${f.context} — ${f.state}${link}`);
+        summaryParts.push(`  • ${f.context} — ${f.state}${link}`);
       }
+      if (changeRequested.length > 0) {
+        summaryParts.push('');
+        summaryParts.push(`Changes requested on the PR (address via code changes if applicable):`);
+        for (const r of changeRequested) {
+          summaryParts.push(`  • Review by ${r.author?.login || 'someone'} requests changes`);
+        }
+      }
+      summaryParts.push('');
+      summaryParts.push(`IGNORE the following — they are pending, non-actionable, or outside code scope:`);
       for (const f of showItems) {
-        const link = f.targetUrl ? ` (${f.targetUrl})` : '';
-        parts.push(`  • ${f.context} — ${f.state}${link}`);
+        summaryParts.push(`  • ${f.context} — ${f.state} (ignore)`);
       }
-      for (const r of changeRequested) {
-        parts.push(`  • Review by ${r.author?.login || 'someone'} requests changes`);
+      if (newComments.length > 0) {
+        summaryParts.push(`  • Comments on the PR (ignore — review them manually)`);
       }
-      for (const c of newComments) {
-        const body = c.body?.replace(/\n/g, ' ').slice(0, 120) || '';
-        parts.push(`  • Comment from ${c.author?.login || 'someone'}: "${body}"`);
-      }
-      const summary = parts.join('\n');
+      const summary = summaryParts.join('\n');
       // Preserve previous Q&A history in feedback before clearing
       const prevQA = db.getTicket(tid)?.questions || [];
       const qaText = prevQA.map((q, i) => `Q: ${q.question}\nA: ${q.answer || '(unanswered)'}`).join('\n\n');
@@ -112,17 +123,23 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
     console.log(`[pr-check] ${tid} — PR #${m[1]} has new activity`);
   }
 
+  // Register a ticket for periodic PR checking.  Idempotent: only the first
+  // call per ticket sets up the interval, so callers never worry about
+  // duplicates (boot scan vs mid-session creation vs manual re-check).
+  function startWatching(tid) {
+    if (watched.has(tid)) return;
+    watched.add(tid);
+    checkTicket(tid);
+    setInterval(() => checkTicket(tid), INTERVAL);
+  }
+
   function scheduleAll() {
     const ids = db.getTicketIds();
     let delay = 5_000;
     for (const tid of ids) {
       const t = db.getTicket(tid);
       if (t && t.stage === 'pr_opened' && t.pr_url && /\/pull\/(\d+)/.test(t.pr_url)) {
-        const d = delay;
-        setTimeout(() => {
-          checkTicket(tid);
-          setInterval(() => checkTicket(tid), INTERVAL);
-        }, d);
+        setTimeout(() => startWatching(tid), delay);
         delay += 15_000;
       }
     }
@@ -132,7 +149,7 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
 
   // Expose so the server can trigger an immediate re-check
   // after a manual Address PR action completes.
-  return { recheckTicket: checkTicket };
+  return { recheckTicket: checkTicket, startWatching };
 }
 
 module.exports = { startPrChecker };

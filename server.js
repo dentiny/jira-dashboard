@@ -17,6 +17,7 @@ const { runGit, execAsync, resolveDiffBase, popStashAndStage, assertWorktreeClea
 const { runTicketTests, buildTestContextForPrompt } = require('./test-runner');
 const { startPrChecker } = require('./pr-checker');
 let _recheckTicket = null;
+let _startWatchingPr = null;
 let _runClarify = null;
 
 const { PREPUSH_RUN_PREFIX, TEST_RUN_PREFIX, STAGE_LABELS, uid, slugFromTitle, ticketId, formatPlanText, escShell } = helpers;
@@ -140,6 +141,9 @@ async function pushAndOpenPr(ticketId, branchName, title, worktreePath) {
     if (ticketGone(ticketId)) return;
     db.updateTicket(ticketId, { stage: 'pr_opened', status: 'idle', pr_url: prUrl });
     await worktrees.release(ticketId);
+    // Kick off periodic PR watching for this ticket.  Idempotent — safe even
+    // if scheduleAll already picked it up (e.g. after a server restart).
+    if (typeof _startWatchingPr === 'function') _startWatchingPr(ticketId);
   } catch (err) {
     if (ticketGone(ticketId)) return;
     db.logActivity(
@@ -343,8 +347,9 @@ async function runClarify(ticketId) {
 
   db.logActivity(ticket.id, 'clarify_start');
   db.updateTicketField(ticket.id, 'status', 'running');
-  // Start fresh session so the coder treats this as a new clarification round
-  db.updateTicketField(ticket.id, 'ocode_session', null);
+  if (!isPR) {
+    db.updateTicketField(ticket.id, 'ocode_session', null);
+  }
   const onProgress = (line) => {
     if (line.startsWith('[resource] ')) {
       const detail = line.slice(11);
@@ -360,15 +365,35 @@ async function runClarify(ticketId) {
 
   // Read the coder's structured output from the file, with text fallback
   let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
-  } catch {
+  let fileContent = null;
+  let fileParseError = null;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      fileContent = fs.readFileSync(outPath, 'utf-8');
+      parsed = JSON.parse(fileContent);
+      break;
+    } catch (e1) {
+      fileParseError = e1;
+      if (attempt < 29) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  }
+  if (!parsed) {
     const jsonMatch = result.text.match(/\{[\s\S]*\}/);
     if (jsonMatch) { try { parsed = JSON.parse(jsonMatch[0]); } catch {} }
   }
   try { fs.unlinkSync(outPath); } catch {}
 
-  if (!parsed) throw new Error('Coder did not write valid JSON output');
+  if (!parsed) {
+    const snippet = (fileContent || result.text || '').slice(0, 500);
+    throw new Error(
+      `Coder did not write valid JSON output` +
+      (fileParseError ? ` — ${fileParseError.message}` : '') +
+      (fileContent ? `\nFile content (${fileContent.length} chars):\n${snippet}` : '') +
+      (!fileContent ? `\nRaw output (${result.text?.length || 0} chars):\n${snippet}` : '')
+    );
+  }
 
   let schema;
   try {
@@ -669,6 +694,7 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
     const runResult = await runCoder(ticket.id, prompt, {
       timeout: config.coder.timeouts.implement,
       onProgress,
+      cwd: worktreePath,
     });
 
     clearInterval(fileMonitor);
@@ -1387,5 +1413,7 @@ app.listen(PORT, '0.0.0.0', () => {
 
   // Periodic PR checker — scans pr_opened tickets for new failures/reviews
   const _runClarify = (tid) => { try { runClarify(tid); } catch {} };
-  _recheckTicket = startPrChecker(db, config, sseBroadcast, _runClarify).recheckTicket;
+  const prChecker = startPrChecker(db, config, sseBroadcast, _runClarify);
+  _recheckTicket = prChecker.recheckTicket;
+  _startWatchingPr = prChecker.startWatching;
 });
