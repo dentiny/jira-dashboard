@@ -80,7 +80,13 @@ Output ONLY valid JSON — no markdown, no explanation, no code fences:
   "notes": "Optional: why these questions matter"
 }`,
 
-  clarifyPR: `A PR for this ticket has issues that need attention. Do NOT re-ask the original implementation questions. Instead, focus only on resolving the PR issues listed below. If you can fix them directly, provide a plan and proceed. If you need clarification about the issues themselves, ask about those specifically.`,
+  clarifyPR: `A PR for this ticket has issues that need attention. Do NOT re-ask the original implementation questions. Focus only on resolving the PR issues listed below. If you can fix them directly, provide a plan and proceed to implementation. If you need clarification about the issues themselves, ask about those specifically.
+
+Write your structured output to the file specified in the context. The file must contain valid JSON conforming to: ${PDIR}/.jira-dashboard/clarification.schema.json
+
+- Use the same schema as a new ticket: "ready" (boolean), "plan" (string, required when ready), "questions" (array of {question, type, options}), "estimated_complexity", "files_to_modify", "notes".
+- Use the Write tool to write the JSON to the output file.
+- Do NOT output the JSON in your response — only write it to the file.`,
   prTasks: `You are addressing GitHub PR tasks for a ${PNAME} ticket. The PR has checks that need attention.
 
 CRITICAL: Do NOT make any code changes. Do NOT edit any files. Only use the \`gh\` CLI.
