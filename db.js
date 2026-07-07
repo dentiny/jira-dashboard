@@ -448,35 +448,26 @@ function getStageResources(ticketId) {
   }
 
   // ── Grand total ──────────────────────────────────────
-  // Resource entries are cumulative snapshots.  Use first→last
-  // across ALL entries for tokens/cost (covers the full session
-  // across all stages).  CPU/elapsed are per-process so we sum
-  // per-stage buckets.
-  if (allRes.length > 0) {
-    const firstOverall = parseKv(allRes[0].detail);
-    const lastOverall = parseKv(allRes[allRes.length - 1].detail);
-    summary.total.tokens_in = Math.max(0, _parseToken(lastOverall.tokens_in) - _parseToken(firstOverall.tokens_in));
-    summary.total.tokens_out = Math.max(0, _parseToken(lastOverall.tokens_out) - _parseToken(firstOverall.tokens_out));
-    summary.total.cost = Math.max(0, _parseCost(lastOverall.cost) - _parseCost(firstOverall.cost));
-    // CPU/elapsed are per-process – sum per-stage buckets
-    for (const key of Object.keys(summary)) {
-      if (key === 'total') continue;
-      const b = summary[key];
-      if (b) {
-        summary.total.cpu += b.cpu;
-        summary.total.elapsed += b.elapsed;
-      }
+  // Per-stage buckets attribute every consecutive-pair delta to the
+  // stage active at the start of the interval.  Summing them gives
+  // the correct cumulative total across all stages.
+  for (const key of Object.keys(summary)) {
+    if (key === 'total') continue;
+    const b = summary[key];
+    if (b) {
+      summary.total.cpu += b.cpu;
+      summary.total.elapsed += b.elapsed;
+      summary.total.tokens_in += b.tokens_in;
+      summary.total.tokens_out += b.tokens_out;
+      summary.total.cost += b.cost;
+      summary.total.calls += b.calls;
     }
-    // peak memory: max across all entries
+  }
+  // peak memory: max across all resource entries
+  if (allRes.length > 0) {
     for (const r of allRes) {
       const mem = parseFloat(parseKv(r.detail).mem) || 0;
       if (mem > summary.total.peak_mem) summary.total.peak_mem = mem;
-    }
-    // calls: sum of per-stage calls
-    for (const key of Object.keys(summary)) {
-      if (key === 'total') continue;
-      const b = summary[key];
-      if (b) summary.total.calls += b.calls;
     }
   }
 
