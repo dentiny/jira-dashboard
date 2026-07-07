@@ -11,6 +11,8 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
     const m = t.pr_url.match(/\/pull\/(\d+)/);
     if (!m) return;
 
+    db.logActivity(tid, 'pr_checking', `Checking PR #${m[1]}...`);
+    sseBroadcast(tid, 'ticket', db.getTicket(tid));
     let json;
     try {
       json = await new Promise((res, rej) => {
@@ -18,7 +20,11 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
           { cwd: config.projectDir, timeout: 15000 },
           (err, out) => err ? rej(err) : res(out));
       });
-    } catch { return; }
+    } catch {
+      db.logActivity(tid, 'pr_checking', `PR #${m[1]} check failed`);
+      sseBroadcast(tid, 'ticket', db.getTicket(tid));
+      return;
+    }
 
     const pr = JSON.parse(json);
     if (pr.state !== 'OPEN') return;
