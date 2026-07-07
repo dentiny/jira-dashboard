@@ -119,18 +119,13 @@ async function pushAndOpenPr(ticketId, branchName, title, worktreePath) {
     if (ticketGone(ticketId)) return;
     db.logActivity(ticketId, 'branch_pushed', `Pushed ${branchName} to origin`);
 
-    let prUrl;
-    try {
-      prUrl = await execAsync(`gh pr create --title "${escShell(title)}" --body ""`, worktreePath, cmdTimeout, register);
-      db.logActivity(ticketId, 'pr_created', prUrl);
-    } catch {
-      // PR may already exist for this branch — try to fetch its URL.
+    const t = db.getTicket(ticketId);
+    let prUrl = t?.pr_url || null;
+    if (!prUrl) {
       try {
-        const json = await execAsync(`gh pr view --json url`, worktreePath, cmdTimeout, register);
-        const parsed = JSON.parse(json);
-        if (parsed?.url) { prUrl = parsed.url; db.logActivity(ticketId, 'pr_link', prUrl); }
-      } catch {}
-      if (!prUrl) {
+        prUrl = await execAsync(`gh pr create --title "${escShell(title)}" --body ""`, worktreePath, cmdTimeout, register);
+        db.logActivity(ticketId, 'pr_created', prUrl);
+      } catch {
         const remoteUrl = await execAsync(`git config --get remote.origin.url`, worktreePath, cmdTimeout, register);
         const repoPath = remoteUrl.replace(/\.git$/, '').replace(/^.*[:/]/, '');
         prUrl = `https://github.com/${repoPath}/pull/new/${branchName}`;
