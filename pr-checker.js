@@ -98,8 +98,12 @@ function startPrChecker(db, config, sseBroadcast) {
         parts.push(`  • Comment from ${c.author?.login || 'someone'}: "${body}"`);
       }
       const summary = parts.join('\n');
+      // Preserve previous Q&A history in feedback before clearing
+      const prevQA = db.getTicket(tid)?.questions || [];
+      const qaText = prevQA.map((q, i) => `Q: ${q.question}\nA: ${q.answer || '(unanswered)'}`).join('\n\n');
+      const fullFeedback = qaText ? `Previous Q&A:\n${qaText}\n\n---\n\n${summary}` : summary;
       db.deleteQuestionsForTicket(tid);
-      db.updateTicket(tid, { stage: 'clarification', review_feedback: summary, plan: null, status: 'idle', pr_tasks_only: 0 });
+      db.updateTicket(tid, { stage: 'clarification', review_feedback: fullFeedback, plan: null, status: 'idle', pr_tasks_only: 0 });
       db.logActivity(tid, 'pr_feedback', `Moved to clarification:\n${summary}`);
     }
     sseBroadcast(tid, 'ticket', db.getTicket(tid));
