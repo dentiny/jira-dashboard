@@ -329,6 +329,7 @@ async function runClarify(ticketId) {
 
   const fbTitle1 = ticket.review_feedback?.match(/^PR #\d+/) ? 'PR issues' : 'Review feedback from previous implementation';
   const outPath = path.join(config.projectDir, '.jira-dashboard', 'tickets', ticket.id, 'clarification.json');
+  try { fs.unlinkSync(outPath); } catch {} // clean slate for this round
   const contextFile = writeTicketContext(ticket.id, [
     { title: 'Ticket title', body: ticket.title },
     { title: 'Ticket description', body: ticket.content },
