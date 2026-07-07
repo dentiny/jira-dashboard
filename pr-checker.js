@@ -23,8 +23,16 @@ function startPrChecker(db, config, sseBroadcast) {
     const pr = JSON.parse(json);
     if (pr.state !== 'OPEN') return;
 
-    const failures = (pr.statusCheckRollup || []).filter(
-      s => s.state === 'FAILURE' || s.state === 'ERROR');
+    const failures = (pr.statusCheckRollup || []).filter(s => {
+      if (s.state !== 'FAILURE' && s.state !== 'ERROR') return false;
+      // Skip process-level checks that the coder cannot address (configurable per project)
+      if (config.prCheckIgnore) {
+        for (const pattern of config.prCheckIgnore) {
+          if (new RegExp(`^${pattern}$`, 'i').test(s.context)) return false;
+        }
+      }
+      return true;
+    });
 
     const changeRequested = (pr.reviews || []).filter(
       r => r.state === 'CHANGES_REQUESTED');

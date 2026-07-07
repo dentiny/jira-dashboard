@@ -155,6 +155,13 @@ const config = {
   // Close / merge strategy
   mergeStrategy: env('MERGE_STRATEGY') || cfg.mergeStrategy || 'cherry-pick',
 
+  // PR checker: CI checks to ignore (comma-separated, case-insensitive).
+  // Typically process gates that the coder cannot address with code changes.
+  prCheckIgnore: (() => {
+    const raw = env('JIRA_PR_IGNORE_CHECKS') || cfg.pr_check?.ignore_checks || '';
+    return raw.split(',').map(s => s.trim()).filter(Boolean);
+  })(),
+
   // Test runner (opt-in, default off)
   test: {
     enabled: env('JIRA_TEST_ENABLED') === 'true' || cfg.test?.enabled || false,
