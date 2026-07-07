@@ -228,21 +228,36 @@ async function getTicketResponse(id) {
   const latestTest = db.getLatestTestRun(id);
   const behindCount = getBranchStaleness(t.worktree_path);
   let pr_state = null;
-  if (t.pr_url && (t.stage === 'pr_opened' || t.stage === 'done')) {
-    const m = t.pr_url.match(/\/pull\/(\d+)/);
-    if (m) {
-      try {
-        const { exec } = require('child_process');
-        const stdout = await new Promise((res, rej) => {
-          exec(`gh pr view ${m[1]} --json state`, { cwd: config.projectDir, timeout: 5000 },
-            (err, out) => err ? rej(err) : res(out));
-        });
-        const parsed = JSON.parse(stdout);
-        if (parsed?.state) pr_state = parsed.state.toLowerCase();
-      } catch {}
+  if (t.stage === 'pr_opened' || t.stage === 'done') {
+    // Resolve PR URL: prefer ticket row, fall back to activity log
+    let prUrl = t.pr_url;
+    if (!prUrl) {
+      const entry = (t.activity || []).find(a => a.action === 'pr_created' || a.action === 'pr_link');
+      if (entry) prUrl = entry.detail;
+    }
+    if (prUrl) {
+      const m = prUrl.match(/\/pull\/(\d+)/);
+      if (m) {
+        try {
+          const { exec } = require('child_process');
+          const stdout = await new Promise((res, rej) => {
+            exec(`gh pr view ${m[1]} --json state`, { cwd: config.projectDir, timeout: 5000 },
+              (err, out) => err ? rej(err) : res(out));
+          });
+          const parsed = JSON.parse(stdout);
+          if (parsed?.state) {
+            pr_state = parsed.state.toLowerCase();
+            if (t.stage === 'pr_opened' && (pr_state === 'merged' || pr_state === 'closed')) {
+              db.updateTicket(t.id, { stage: 'done' });
+              db.logActivity(t.id, 'pr_' + pr_state, `PR ${m[1]} ${pr_state} — auto-transitioned to done`);
+            }
+          }
+        } catch {}
+      }
     }
   }
-  return { ...t, stage_resources: stageResources, latest_test: latestTest, behind_count: behindCount, pr_state };
+  const updated = pr_state ? db.getTicket(id) : t;
+  return { ...updated, stage_resources: stageResources, latest_test: latestTest, behind_count: behindCount, pr_state };
 }
 
 app.get('/api/tickets/:id', async (req, res) => {
@@ -957,7 +972,7 @@ app.post('/api/tickets/:id/close', async (req, res) => {
   // 2. Mark terminal BEFORE releasing the worktree. A handler whose coder
   //    process we just killed will resume in its catch block; seeing the
   //    closed stage (via isClosed) it bails instead of reopening the ticket.
-  db.updateTicket(ticket.id, { stage: 'done', status: 'idle', commit_sha: null, pr_url: null });
+  db.updateTicket(ticket.id, { stage: 'done', status: 'idle', commit_sha: null });
 
   // 3. Release the worktree / pool slot and branch (safe when there is none).
   await worktrees.release(ticket.id);
