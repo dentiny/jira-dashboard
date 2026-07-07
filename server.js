@@ -811,7 +811,11 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
     let hasChanges = false;
     try { runGit(`diff --quiet`, ticket.worktree_path); } catch { hasChanges = true; }
     try { runGit(`diff --cached --quiet`, ticket.worktree_path); } catch { hasChanges = true; }
-    if (!hasChanges) {
+    // PR strategy only commits new worktree changes — pre-existing branch
+    // commits (from a prior run) are already on the branch and don't need
+    // a new commit.  Non-PR strategies need the branch-ahead check so the
+    // subsequent rebase/cherry-pick has something to apply.
+    if (!hasChanges && config.mergeStrategy !== 'pr') {
       try {
         const ahead = parseInt(runGit(`rev-list --count origin/${config.branchDefault}..${ticket.branch_name}`, ticket.worktree_path), 10) || 0;
         if (ahead > 0) hasChanges = true;
