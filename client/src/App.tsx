@@ -938,6 +938,7 @@ export default function App() {
   }
 
   async function handlePrTasks(id: string) {
+    setStdoutLines([])
     try {
       const t: T = await fetchJSON(`/api/tickets/${id}/pr-tasks`, { method: 'POST' })
       setSel(t); setTickets(p => p.map(x => (x.id === id ? t : x)))
@@ -1817,6 +1818,14 @@ export default function App() {
                     </div>
                   </div>
                 )}
+
+                {/* PR tasks console output */}
+                {sel.stage === 'pr_opened' && stdoutLines.length > 0 && (
+                  <div className="mt-3 rounded-md ring-1 ring-border bg-zinc-950 text-ink-3 p-3 max-h-64 overflow-y-auto t-mono-12 leading-relaxed whitespace-pre-wrap break-words">
+                    {stdoutLines.map((l, i) => <div key={i}>{l}</div>)}
+                  </div>
+                )}
+
               </div>
 
               {/* Activity sidebar — same scroll, no nested scrollbar */}
