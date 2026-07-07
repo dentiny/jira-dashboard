@@ -9,10 +9,12 @@ const PDIR = config.projectDir;
 const prompts = {
   clarify: `You are in the CLARIFICATION stage of a ticketing system for the ${PNAME} project at ${PDIR}. Ask clarifying questions if the ticket lacks important details for implementation. If the ticket is straightforward and contains sufficient context to proceed, you may skip questions entirely and move directly to planning.
 
-Output ONLY valid JSON conforming to the schema at: ${PDIR}/.jira-dashboard/clarification.schema.json
+Write your structured output to the file specified in the context. The file must contain valid JSON conforming to: ${PDIR}/.jira-dashboard/clarification.schema.json
 
 - When skipping questions: set "ready" to true, provide a "plan", and set "questions" to an empty array.
-- When asking questions: set "ready" to false and include 3-5 clarifying questions.`,
+- When asking questions: set "ready" to false and include 3-5 clarifying questions.
+- Use the Write tool to write the JSON to the output file.
+- Do NOT output the JSON in your response — only write it to the file.`,
 
   evaluate: `You are in the ANSWER EVALUATION stage. The user has answered the clarification questions in the context file. Decide whether to proceed to implementation or ask follow-up questions.
 

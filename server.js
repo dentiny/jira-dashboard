@@ -328,13 +328,15 @@ async function runClarify(ticketId) {
   if (!ticket || ticket.stage !== 'clarification' || ticket.status === 'running') return;
 
   const fbTitle1 = ticket.review_feedback?.match(/^PR #\d+/) ? 'PR issues' : 'Review feedback from previous implementation';
+  const outPath = path.join(config.projectDir, '.jira-dashboard', 'tickets', ticket.id, 'clarification.json');
   const contextFile = writeTicketContext(ticket.id, [
     { title: 'Ticket title', body: ticket.title },
     { title: 'Ticket description', body: ticket.content },
     ticket.review_feedback && { title: fbTitle1, body: ticket.review_feedback },
+    { title: 'Output file', body: `Write your JSON output to: ${outPath}` },
   ].filter(Boolean));
 
-  const prompt = `${prompts.clarify}\n\nRead full ticket context at: ${contextFile}`;
+  const prompt = `${prompts.clarify}\n\nRead full ticket context at: ${contextFile}\n\nWrite your JSON output to: ${outPath}`;
 
   db.logActivity(ticket.id, 'clarify_start');
   db.updateTicketField(ticket.id, 'status', 'running');
@@ -352,18 +354,19 @@ async function runClarify(ticketId) {
   const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress });
   captureSessionId(ticket.id, result.sessionId);
   db.updateTicketField(ticket.id, 'status', 'idle');
-  const output = result.text;
 
+  // Read the coder's structured output from the file, with text fallback
   let parsed;
   try {
-    const jsonMatch = output.match(/\{[\s\S]*\}/);
-    parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+    parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
   } catch {
-    parsed = null;
+    const jsonMatch = result.text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) { try { parsed = JSON.parse(jsonMatch[0]); } catch {} }
   }
+  try { fs.unlinkSync(outPath); } catch {}
 
-  // Validate against the clarification schema
-  if (!parsed) throw new Error('Coder response was not valid JSON');
+  if (!parsed) throw new Error('Coder did not write valid JSON output');
+
   let schema;
   try {
     schema = JSON.parse(fs.readFileSync(
@@ -372,7 +375,7 @@ async function runClarify(ticketId) {
   if (schema) {
     const ajv = new Ajv();
     if (!ajv.validate(schema, parsed)) throw new Error(
-      `Clarification schema validation failed: ${ajv.errorsText()}. Click Clarify to retry.`);
+      `${ajv.errorsText()} — click Clarify to retry`);
   }
 
   const questions = parsed.questions || [];
