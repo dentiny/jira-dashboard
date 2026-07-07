@@ -17,6 +17,7 @@
     "prepush": "bash .githooks/pre-push"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1"
   }
