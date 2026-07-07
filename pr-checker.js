@@ -105,6 +105,10 @@ function startPrChecker(db, config, sseBroadcast) {
   }
 
   scheduleAll();
+
+  // Expose so the server can trigger an immediate re-check
+  // after a manual Address PR action completes.
+  return { recheckTicket: checkTicket };
 }
 
 module.exports = { startPrChecker };

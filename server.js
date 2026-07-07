@@ -15,6 +15,7 @@ const { runCoder, killTicketProcess, isClosed, ticketGone, captureSessionId, run
 const { runGit, execAsync, resolveDiffBase, popStashAndStage, assertWorktreeClean, getBranchStaleness, commitWorktreeChanges } = require('./git-utils');
 const { runTicketTests, buildTestContextForPrompt } = require('./test-runner');
 const { startPrChecker } = require('./pr-checker');
+let _recheckTicket = null;
 
 const { PREPUSH_RUN_PREFIX, TEST_RUN_PREFIX, STAGE_LABELS, uid, slugFromTitle, ticketId, formatPlanText, escShell } = helpers;
 
@@ -520,6 +521,7 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
     await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress, cwd: config.projectDir });
     db.updateTicket(ticket.id, { status: 'idle', pr_tasks_only: 0 });
     db.logActivity(ticket.id, 'pr_tasks_done', 'PR tasks addressed');
+    if (_recheckTicket) _recheckTicket(ticket.id);
     res.json({ success: true, ticket: db.getTicket(ticket.id) });
   } catch (err) {
     db.logActivity(ticket.id, 'pr_tasks_error', err.message);
@@ -1338,5 +1340,5 @@ app.listen(PORT, '0.0.0.0', () => {
   if (suggestions.length < SUGGESTIONS_MAX) generateSuggestions();
 
   // Periodic PR checker — scans pr_opened tickets for new failures/reviews
-  startPrChecker(db, config, sseBroadcast);
+  _recheckTicket = startPrChecker(db, config, sseBroadcast).recheckTicket;
 });
