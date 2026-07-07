@@ -498,10 +498,20 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
   }
   if (ticket.status === 'running') return res.status(409).json({ error: 'Already processing, wait for completion' });
 
+  // Show user all items; only pass actionable ones to the coder
+  const actionableFeedback = !ticket.review_feedback ? null : ticket.review_feedback.split('\n').filter(line => {
+    if (!line.includes('—')) return true;
+    if (!config.prCheckIgnore) return true;
+    for (const pattern of config.prCheckIgnore) {
+      if (new RegExp(pattern, 'i').test(line)) return false;
+    }
+    return true;
+  }).join('\n');
+
   const contextFile = writeTicketContext(ticket.id, [
     { title: 'Ticket title', body: ticket.title },
     { title: 'Ticket description', body: ticket.content },
-    ticket.review_feedback && { title: 'PR issues to address', body: ticket.review_feedback },
+    actionableFeedback && { title: 'PR issues to address', body: actionableFeedback },
   ].filter(Boolean));
 
   const prompt = `${prompts.prTasks}\n\nRead full ticket context at: ${contextFile}\nWork in: ${config.projectDir}`;
