@@ -356,9 +356,18 @@ async function runClarify(ticketId) {
   let parsed;
   try {
     const jsonMatch = output.match(/\{[\s\S]*\}/);
-    parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { questions: [output] };
+    parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
   } catch {
-    parsed = { questions: [output], notes: 'Could not parse structured output' };
+    parsed = null;
+  }
+
+  // Validate against the expected clarification schema
+  function isValidOutput(p) {
+    return p && typeof p === 'object' && Array.isArray(p.questions) && typeof p.ready === 'boolean'
+      && (!p.ready || (typeof p.plan === 'string' && p.plan.trim()));
+  }
+  if (!isValidOutput(parsed)) {
+    throw new Error('Coder output did not match the expected clarification schema. No questions were generated. Please try again.');
   }
 
   const questions = parsed.questions || [];
