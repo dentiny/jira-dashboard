@@ -370,7 +370,6 @@ app.post('/api/tickets/:id/clarify', async (req, res) => {
         plan: planText,
         estimated_complexity: parsed.estimated_complexity || null,
         plan_notes: notes || null,
-        review_feedback: null,
         stage: 'implementation',
       });
       db.logActivity(ticket.id, 'clarified_skip', planText.slice(0, 200));
@@ -473,7 +472,6 @@ app.post('/api/tickets/:id/answer', async (req, res) => {
       plan: planText,
       estimated_complexity: parsed.estimated_complexity || null,
       plan_notes: parsed.notes || null,
-      review_feedback: null,
       stage: 'implementation',
     });
     db.logActivity(ticket.id, 'clarified_plan', parsed.notes || '');
