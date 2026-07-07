@@ -936,6 +936,14 @@ export default function App() {
     } catch (e: any) { setError(e.message) } finally { setCreating(false) }
   }
 
+  async function handlePrTasks(id: string) {
+    try {
+      const t: T = await fetchJSON(`/api/tickets/${id}/pr-tasks`, { method: 'POST' })
+      setSel(t); setTickets(p => p.map(x => (x.id === id ? t : x)))
+      lastUpd.current = t.updated_at
+    } catch (e: any) { setError(e.message) }
+  }
+
   async function clarify(id: string) {
     try {
       const t: T = await fetchJSON(`/api/tickets/${id}/clarify`, { method: 'POST' })
@@ -1836,6 +1844,11 @@ export default function App() {
                 {sel.questions.length === 0 && (
                   <Btn variant="outline" onClick={() => clarify(sel.id)}>
                     <RefreshCw className="h-3.5 w-3.5" /> Retry
+                  </Btn>
+                )}
+                {sel.review_feedback && sel.status !== 'running' && (
+                  <Btn variant="secondary" onClick={() => handlePrTasks(sel.id)}>
+                    <ExternalLink className="h-3.5 w-3.5" /> Address PR
                   </Btn>
                 )}
                 {sel.questions.some(q => !q.answer) && (

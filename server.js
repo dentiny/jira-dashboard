@@ -488,6 +488,46 @@ app.post('/api/tickets/:id/answer', async (req, res) => {
   }
 });
 
+// ── PR tasks (non-code, gh CLI only) ─────────────────────
+app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
+  const ticket = db.getTicket(req.params.id);
+  if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+  if (ticket.stage !== 'clarification' && ticket.stage !== 'pr_opened') {
+    return res.status(400).json({ error: `Ticket is in ${ticket.stage} stage` });
+  }
+  if (ticket.status === 'running') return res.status(409).json({ error: 'Already processing, wait for completion' });
+
+  const contextFile = writeTicketContext(ticket.id, [
+    { title: 'Ticket title', body: ticket.title },
+    { title: 'Ticket description', body: ticket.content },
+    ticket.review_feedback && { title: 'PR issues to address', body: ticket.review_feedback },
+  ].filter(Boolean));
+
+  const prompt = `${prompts.prTasks}\n\nRead full ticket context at: ${contextFile}\nWork in: ${config.projectDir}`;
+
+  try {
+    db.logActivity(ticket.id, 'pr_tasks_start');
+    db.updateTicketField(ticket.id, 'status', 'running');
+    const onProgress = (line) => {
+      if (line.startsWith('[resource] ')) {
+        const detail = line.slice(11);
+        db.logActivity(ticket.id, 'resource', detail, 'clarification');
+        sseBroadcast(ticket.id, 'resource', { detail });
+      } else if (line.trim()) {
+        sseBroadcast(ticket.id, 'stdout', { text: line });
+      }
+    };
+    await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress, cwd: config.projectDir });
+    db.updateTicketField(ticket.id, 'status', 'idle');
+    db.logActivity(ticket.id, 'pr_tasks_done', 'PR tasks addressed');
+    res.json({ success: true, ticket: db.getTicket(ticket.id) });
+  } catch (err) {
+    db.logActivity(ticket.id, 'pr_tasks_error', err.message);
+    db.updateTicketField(ticket.id, 'status', 'idle');
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Stage 2: Implementation ───────────────────────────────
 app.post('/api/tickets/:id/implement', async (req, res) => {
   let ticket = db.getTicket(req.params.id);
