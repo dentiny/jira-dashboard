@@ -161,6 +161,10 @@ const config = {
     const raw = env('JIRA_PR_IGNORE_CHECKS') || cfg.pr_check?.ignore_checks || '';
     return raw.split(',').map(s => s.trim()).filter(Boolean);
   })(),
+  prCheckIgnoreAuthors: (() => {
+    const raw = env('JIRA_PR_IGNORE_AUTHORS') || cfg.pr_check?.ignore_authors || '';
+    return raw.split(',').map(s => s.trim()).filter(Boolean);
+  })(),
 
   // Test runner (opt-in, default off)
   test: {

@@ -37,9 +37,10 @@ function startPrChecker(db, config, sseBroadcast) {
     const changeRequested = (pr.reviews || []).filter(
       r => r.state === 'CHANGES_REQUESTED');
 
+    const ignoredAuthors = (config.prCheckIgnoreAuthors || []).map(a => a.toLowerCase());
     const newComments = (pr.comments || []).filter(c => {
       if (c.isMinimized) return false;
-      if (c.author?.login === 'nuro-ci') return false;
+      if (ignoredAuthors.includes((c.author?.login || '').toLowerCase())) return false;
       return true;
     });
 
