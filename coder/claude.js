@@ -90,12 +90,18 @@ module.exports = function claudeBackend(config, store) {
             }
             if (evt.type === 'result' && evt.subtype === 'success') {
               if (evt.total_cost_usd !== undefined) {
+                const prev = store.lastUsage;
+                const prevCost = prev.cost || 0;
                 tokens = {
                   cost: evt.total_cost_usd,
                   input: String(evt.usage?.input_tokens || 0),
                   output: String(evt.usage?.output_tokens || 0),
                 };
-                store.setUsage(tokens);
+                store.setUsage({
+                  cost: prevCost + (evt.total_cost_usd || 0),
+                  input: prev.input,
+                  output: prev.output,
+                });
               }
               if (evt.session_id) { sessionId = evt.session_id; store.setSessionId(evt.session_id); }
               else if (sessionId) store.setSessionId(sessionId);
