@@ -557,23 +557,34 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
   }
   if (ticket.status === 'running') return res.status(409).json({ error: 'Already processing, wait for completion' });
 
-  // Show user all items; only pass actionable ones to the coder
-  const actionableFeedback = !ticket.review_feedback ? null : ticket.review_feedback.split('\n').filter(line => {
-    if (!line.includes('—')) return true;
-    if (!config.prCheckIgnore) return true;
-    for (const pattern of config.prCheckIgnore) {
-      if (new RegExp(pattern, 'i').test(line)) return false;
-    }
-    return true;
-  }).join('\n');
+  // Filter review_feedback: strip IGNORE checks (never shown) and REWORK checks
+  // (handled by Path 2 auto-move).  Only Show-bucket items reach the coder.
+  const ignorePatterns = (config.prCheckIgnore || []).map(p => new RegExp(p, 'i'));
+  const reworkPatterns = (config.prReworkChecks || []).map(p => new RegExp(p, 'i'));
+  const isFilteredLine = (line) => {
+    if (!line.includes('—')) return false;
+    for (const re of ignorePatterns) { if (re.test(line)) return true; }
+    for (const re of reworkPatterns) { if (re.test(line)) return true; }
+    return false;
+  };
+  const actionableFeedback = !ticket.review_feedback ? null :
+    ticket.review_feedback.split('\n').filter(l => !isFilteredLine(l)).join('\n');
+
+  // Use a file-based output contract (same pattern as clarification) so the
+  // coder writes structured JSON to a known path rather than embedding it in
+  // conversation text.
+  const outPath = path.join(config.projectDir, '.jira-dashboard', 'tickets', ticket.id, 'pr-rework.json');
+  try { fs.unlinkSync(outPath); } catch {} // clean slate
 
   const contextFile = writeTicketContext(ticket.id, [
     { title: 'Ticket title', body: ticket.title },
     { title: 'Ticket description', body: ticket.content },
     actionableFeedback && { title: 'PR issues to address', body: actionableFeedback },
+    { title: 'Output file', body: `Write your JSON output to: ${outPath}` },
   ].filter(Boolean));
 
-  const prompt = `${prompts.prTasks}\n\nRead full ticket context at: ${contextFile}\nWork in: ${config.projectDir}`;
+  const schemaPath = path.join(config.projectDir, '.jira-dashboard', 'pr-rework.schema.json');
+  const prompt = `${prompts.prTasks}\n\nRead full ticket context at: ${contextFile}\n\nWrite your JSON output to: ${outPath}\nSchema: ${schemaPath}`;
 
   try {
     db.logActivity(ticket.id, 'pr_tasks_start');
@@ -589,10 +600,32 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
         sseBroadcast(ticket.id, 'stdout', { text: line });
       }
     };
-    await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress, cwd: config.projectDir });
-    db.updateTicket(ticket.id, { status: 'idle', pr_tasks_only: 0 });
-    db.logActivity(ticket.id, 'pr_tasks_done', 'PR tasks addressed');
-    if (_recheckTicket) _recheckTicket(ticket.id);
+    const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress, cwd: config.projectDir });
+
+    // ── Parse rework assessment from the output file ──────────
+    let reworkList = [];
+    let fileContent = null;
+    try { fileContent = fs.readFileSync(outPath, 'utf-8'); } catch {}
+    if (fileContent) {
+      try {
+        const parsed = JSON.parse(fileContent);
+        if (Array.isArray(parsed.rework_checks)) reworkList = parsed.rework_checks.filter(Boolean);
+      } catch {}
+    }
+    try { fs.unlinkSync(outPath); } catch {}
+
+    if (reworkList.length > 0) {
+      // Coder identified checks needing code rework → move to clarification
+      const prNum = (ticket.pr_url || '').match(/\/pull\/(\d+)/)?.[1] || '?';
+      const feedback = `PR #${prNum} — checks that need code changes:\n${reworkList.map(c => `  • ${c}`).join('\n')}`;
+      db.updateTicket(ticket.id, { status: 'idle', stage: 'clarification', plan: null, review_feedback: feedback, pr_rework_needed: 1 });
+      db.logActivity(ticket.id, 'pr_tasks_rework', `Rework needed: ${reworkList.join(', ')}`);
+      if (_runClarify) _runClarify(ticket.id);
+    } else {
+      db.updateTicket(ticket.id, { status: 'idle', pr_rework_needed: 0 });
+      db.logActivity(ticket.id, 'pr_tasks_done', 'PR tasks addressed');
+      if (_recheckTicket) _recheckTicket(ticket.id);
+    }
     res.json(db.getTicket(ticket.id));
   } catch (err) {
     db.logActivity(ticket.id, 'pr_tasks_error', err.message);
@@ -1412,7 +1445,7 @@ app.listen(PORT, '0.0.0.0', () => {
   if (suggestions.length < SUGGESTIONS_MAX) generateSuggestions();
 
   // Periodic PR checker — scans pr_opened tickets for new failures/reviews
-  const _runClarify = (tid) => { try { runClarify(tid); } catch {} };
+  _runClarify = (tid) => { try { runClarify(tid); } catch {} };
   const prChecker = startPrChecker(db, config, sseBroadcast, _runClarify);
   _recheckTicket = prChecker.recheckTicket;
   _startWatchingPr = prChecker.startWatching;

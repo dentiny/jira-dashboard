@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PR Rework Assessment",
+  "description": "Output format for the PR tasks stage. The coder lists which checks need code changes (rework) vs which were resolved via non-code actions.",
+  "type": "object",
+  "properties": {
+    "rework_checks": {
+      "type": "array",
+      "description": "Names of checks that require code changes to resolve. These will trigger an auto-move to clarification for a separate code rework flow.",
+      "items": {
+        "type": "string",
+        "description": "Full check name as shown in the PR status checks (e.g. 'Code Checks', 'Simtest Status')"
+      }
+    }
+  },
+  "required": ["rework_checks"]
+}

@@ -5,6 +5,26 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
   const prStates = new Map(); // ticketId → state hash
   const watched = new Set();   // ticketIds that have an active setInterval
 
+  // ── Check classification helpers ──────────────────────────
+  const ignoreSet = new Set(config.prCheckIgnore || []);
+  const reworkSet = new Set(config.prReworkChecks || []);
+
+  function isIgnored(name) {
+    if (ignoreSet.size === 0) return false;
+    for (const pattern of ignoreSet) {
+      if (new RegExp(`^${pattern}$`, 'i').test(name)) return true;
+    }
+    return false;
+  }
+
+  function isRework(name) {
+    if (reworkSet.size === 0) return false;
+    for (const pattern of reworkSet) {
+      if (new RegExp(`^${pattern}$`, 'i').test(name)) return true;
+    }
+    return false;
+  }
+
   async function checkTicket(tid) {
     const t = db.getTicket(tid);
     if (!t || t.stage !== 'pr_opened' || !t.pr_url) return;
@@ -24,46 +44,51 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
     const pr = JSON.parse(json);
     if (pr.state !== 'OPEN') return;
 
-    const isIgnored = (name) => {
-      if (!config.prCheckIgnore) return false;
-      for (const pattern of config.prCheckIgnore) {
-        if (new RegExp(`^${pattern}$`, 'i').test(name)) return true;
-      }
-      return false;
+    // ── Normalize check fields ──────────────────────────────
+    // StatusContext uses context/state; CheckRun uses name/conclusion/status.
+    const checkName = (c) => c.context || c.name || '';
+    const checkState = (c) => c.state || c.conclusion || (
+      c.status === 'IN_PROGRESS' || c.status === 'QUEUED' ? 'PENDING' : c.status
+    ) || '?';
+    const isFailed = (c) => {
+      const s = checkState(c);
+      return s === 'FAILURE' || s === 'ERROR';
+    };
+    const isSuccess = (c) => {
+      const s = checkState(c);
+      return s === 'SUCCESS' || s === 'NEUTRAL' || s === 'SKIPPED';
     };
 
-    // FAILURE/ERROR checks that the coder can address → move to clarification
-    const actionableFailures = (pr.statusCheckRollup || []).filter(
-      s => (s.state === 'FAILURE' || s.state === 'ERROR') && !isIgnored(s.context));
+    // ── Classify each check into Ignore / Rework / Show ────
+    const reworkFailures = []; // FAILURE/ERROR rework checks → trigger code rework
+    const showItems = [];      // everything else → Address PR button
 
-    // PENDING + non-actionable failures → show but stay in pr_opened (Address PR)
-    const showItems = (pr.statusCheckRollup || []).filter(s => {
-      if (s.state === 'FAILURE' || s.state === 'ERROR') return isIgnored(s.context);
-      if (s.state === 'PENDING') return true;
-      return false;
-    });
+    for (const check of (pr.statusCheckRollup || [])) {
+      const name = checkName(check);
+      if (isIgnored(name)) continue; // fully ignored, never stored or shown
+      if (isRework(name) && isFailed(check)) {
+        reworkFailures.push(check);
+      } else if (!isSuccess(check)) {
+        showItems.push(check);
+      }
+    }
 
     const changeRequested = (pr.reviews || []).filter(
       r => r.state === 'CHANGES_REQUESTED');
 
-    const ignoredAuthors = (config.prCheckIgnoreAuthors || []).map(a => a.toLowerCase());
-    const newComments = (pr.comments || []).filter(c => {
-      if (c.isMinimized) return false;
-      if (ignoredAuthors.includes((c.author?.login || '').toLowerCase())) return false;
-      return true;
-    });
+    const newComments = (pr.comments || []).filter(c => !c.isMinimized);
 
-    const totalItems = actionableFailures.length + showItems.length + changeRequested.length + newComments.length;
+    const totalItems = reworkFailures.length + showItems.length + changeRequested.length + newComments.length;
     if (totalItems === 0) {
-      if (t.pr_tasks_only) {
-        db.updateTicket(tid, { pr_tasks_only: 0, review_feedback: null });
+      if (t.pr_rework_needed) {
+        db.updateTicket(tid, { pr_rework_needed: 0, review_feedback: null });
         db.logActivity(tid, 'pr_feedback', `PR #${m[1]} all clear — flags reset`);
         sseBroadcast(tid, 'ticket', db.getTicket(tid));
       }
       return;
     }
 
-    const sig = JSON.stringify({ actionableFailures, showItems, changeRequested, newComments });
+    const sig = JSON.stringify({ reworkFailures, showItems, changeRequested, newComments });
     const prev = prStates.get(tid);
     if (prev === sig) {
       db.updateTicketField(tid, 'updated_at', new Date().toISOString());
@@ -71,27 +96,31 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
     }
     prStates.set(tid, sig);
 
-    const needsMove = actionableFailures.length > 0 || changeRequested.length > 0;
-    const parts = [];
+    const needsMove = reworkFailures.length > 0 || changeRequested.length > 0;
+
+    const showItemLine = (f) => `  • ${checkName(f)} — ${checkState(f)}${f.targetUrl ? ` (${f.targetUrl})` : ''}`;
+
     if (!needsMove) {
-      // Only show items (pending, non-actionable, comments) → stay in pr_opened, flag for Address PR
+      // Only Show items + comments → stay in pr_opened, show Address PR button
+      const parts = [];
       for (const f of showItems) {
-        const link = f.targetUrl ? ` (${f.targetUrl})` : '';
-        parts.push(`  • ${f.context} — ${f.state}${link}`);
+        parts.push(showItemLine(f));
       }
       if (newComments.length > 0) {
         parts.push(`  • ${newComments.length} new comment(s) on the PR`);
       }
       const summary = parts.join('\n');
       const header = `PR #${m[1]} has tasks that need attention:\n`;
-      db.updateTicket(tid, { review_feedback: header + summary, pr_tasks_only: 1 });
+      db.updateTicket(tid, { review_feedback: header + summary, pr_rework_needed: 0 });
       db.logActivity(tid, 'pr_feedback', `PR tasks set on ${tid}:\n${header}${summary}`);
     } else {
-      // Has actionable failures or change requests → move to clarification
-      const summaryParts = [`PR #${m[1]} — actionable failures to fix (code may need changes):`];
-      for (const f of actionableFailures) {
-        const link = f.targetUrl ? ` (${f.targetUrl})` : '';
-        summaryParts.push(`  • ${f.context} — ${f.state}${link}`);
+      // Rework failures or change requests → move to clarification
+      const summaryParts = [];
+      if (reworkFailures.length > 0) {
+        summaryParts.push([
+          `PR #${m[1]} — the following checks require code changes:`,
+          ...reworkFailures.map(showItemLine),
+        ].join('\n'));
       }
       if (changeRequested.length > 0) {
         summaryParts.push('');
@@ -100,13 +129,10 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
           summaryParts.push(`  • Review by ${r.author?.login || 'someone'} requests changes`);
         }
       }
-      summaryParts.push('');
+      summaryParts.push(``);
       summaryParts.push(`IGNORE the following — they are pending, non-actionable, or outside code scope:`);
       for (const f of showItems) {
-        summaryParts.push(`  • ${f.context} — ${f.state} (ignore)`);
-      }
-      if (newComments.length > 0) {
-        summaryParts.push(`  • Comments on the PR (ignore — review them manually)`);
+        summaryParts.push(`${showItemLine(f)} (ignore)`);
       }
       const summary = summaryParts.join('\n');
       // Preserve previous Q&A history in feedback before clearing
@@ -114,7 +140,7 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
       const qaText = prevQA.map((q, i) => `Q: ${q.question}\nA: ${q.answer || '(unanswered)'}`).join('\n\n');
       const fullFeedback = qaText ? `Previous Q&A:\n${qaText}\n\n---\n\n${summary}` : summary;
       db.deleteQuestionsForTicket(tid);
-      db.updateTicket(tid, { stage: 'clarification', review_feedback: fullFeedback, plan: null, status: 'idle', pr_tasks_only: 0 });
+      db.updateTicket(tid, { stage: 'clarification', review_feedback: fullFeedback, plan: null, status: 'idle', pr_rework_needed: 1 });
       db.logActivity(tid, 'pr_feedback', `Moved to clarification:\n${summary}`);
       // Auto-trigger clarify so the coder generates questions automatically
       if (runClarify) runClarify(tid);
@@ -145,7 +171,29 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
     }
   }
 
+  // Clear stale review_feedback from previous sessions — it gets repopulated
+  // by the first checkTicket run.  Without this, old "tasks that need attention"
+  // content survives across restarts and is visible during the boot delay.
+  for (const tid of db.getTicketIds()) {
+    const t = db.getTicket(tid);
+    if (t && t.stage === 'pr_opened') {
+      db.updateTicketField(tid, 'review_feedback', null);
+    }
+  }
+
   scheduleAll();
+
+  // Periodic rescan: catch any tickets that entered pr_opened mid-session
+  // (e.g. manual DB edit, PR checker clearing a clarification move, recovery
+  // from interrupted push) without needing a server restart.  Idempotent via
+  // the watched Set — already-watched tickets are skipped.
+  setInterval(() => {
+    const ids = db.getTicketIds();
+    for (const tid of ids) {
+      const t = db.getTicket(tid);
+      if (t && t.stage === 'pr_opened' && t.pr_url) startWatching(tid);
+    }
+  }, INTERVAL); // same cadence as per-ticket checks
 
   // Expose so the server can trigger an immediate re-check
   // after a manual Address PR action completes.

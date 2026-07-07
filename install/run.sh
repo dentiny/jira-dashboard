@@ -119,7 +119,7 @@ case "${NUM_WORKTREES:-0}" in ''|*[!0-9]*) NUM_WORKTREES=0;; esac
 # conflict-resolution stages into the project's .jira-dashboard/. Always
 # refresh (cp -f) so schema updates in the dashboard repo propagate on
 # re-install. Prompts reference them at ${PROJECT_DIR}/.jira-dashboard/.
-cp -f "${ROOT}/clarification.schema.json" "${ROOT}/resolve-conflict.schema.json" "${ENV_DIR}/"
+cp -f "${ROOT}/clarification.schema.json" "${ROOT}/resolve-conflict.schema.json" "${ROOT}/pr-rework.schema.json" "${ENV_DIR}/"
 ok "Installed coder schemas into ${ENV_DIR}"
 
 # ── Step 1b: Worktree pool (idempotent) ────────────────────

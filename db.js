@@ -96,8 +96,11 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN base_sha TEXT`); } catch {}
 // Migration: add coder_pgid column (process group ID for orphan cleanup)
 try { db.exec(`ALTER TABLE tickets ADD COLUMN coder_pgid INTEGER`); } catch {}
 
-// Migration: add pr_tasks_only column (non-actionable PR items flag)
+// Migration: add pr_tasks_only column (deprecated — replaced by pr_rework_needed)
 try { db.exec(`ALTER TABLE tickets ADD COLUMN pr_tasks_only INTEGER DEFAULT 0`); } catch {}
+
+// Migration: add pr_rework_needed column (1 = code rework needed, 0 = Address PR or no action)
+try { db.exec(`ALTER TABLE tickets ADD COLUMN pr_rework_needed INTEGER DEFAULT 0`); } catch {}
 
 // ── Prepared statements ───────────────────────────────────
 const stmts = {
@@ -109,11 +112,11 @@ const stmts = {
     INSERT INTO tickets (id, title, content, stage, plan, worktree_path,
       branch_name, commit_sha, pr_url, review_feedback, status, ocode_session,
       total_cpu, total_elapsed, token_cost, token_input, token_output,
-      estimated_complexity, plan_notes, coder_pgid, pr_tasks_only, created_at, updated_at)
+      estimated_complexity, plan_notes, coder_pgid, pr_rework_needed, created_at, updated_at)
     VALUES (@id, @title, @content, @stage, @plan, @worktree_path,
       @branch_name, @commit_sha, @pr_url, @review_feedback, @status, @ocode_session,
       @total_cpu, @total_elapsed, @token_cost, @token_input, @token_output,
-      @estimated_complexity, @plan_notes, @coder_pgid, @pr_tasks_only, @created_at, @updated_at)
+      @estimated_complexity, @plan_notes, @coder_pgid, @pr_rework_needed, @created_at, @updated_at)
   `),
   updateTicket: db.prepare(`
     UPDATE tickets SET
@@ -125,7 +128,7 @@ const stmts = {
       token_cost = @token_cost, token_input = @token_input,
       token_output = @token_output,
       estimated_complexity = @estimated_complexity,
-      plan_notes = @plan_notes, coder_pgid = @coder_pgid, pr_tasks_only = @pr_tasks_only, updated_at = @updated_at
+      plan_notes = @plan_notes, coder_pgid = @coder_pgid, pr_rework_needed = @pr_rework_needed, updated_at = @updated_at
     WHERE id = @id
   `),
   updateTicketField: (field) => db.prepare(`
@@ -255,7 +258,7 @@ function createTicket(data) {
     estimated_complexity: null,
     plan_notes: null,
     coder_pgid: null,
-    pr_tasks_only: 0,
+    pr_rework_needed: 0,
   };
   const t = { ...defaults, ...data };
   stmts.insertTicket.run(t);
@@ -510,7 +513,7 @@ function migrateFromJSON() {
         token_input: t.token_usage?.input || null,
         token_output: t.token_usage?.output || null,
         coder_pgid: null,
-        pr_tasks_only: 0,
+        pr_rework_needed: 0,
         created_at: t.created_at || new Date().toISOString(),
         updated_at: t.updated_at || new Date().toISOString(),
       });

@@ -155,16 +155,19 @@ const config = {
   // Close / merge strategy
   mergeStrategy: env('MERGE_STRATEGY') || cfg.mergeStrategy || 'cherry-pick',
 
-  // PR checker: CI checks to ignore (comma-separated, case-insensitive).
-  // Typically process gates that the coder cannot address with code changes.
+  // PR checker: CI checks to fully ignore (comma-separated, case-insensitive).
+  // Never shown to any coder prompt. Typically process gates like automerge.
   prCheckIgnore: (() => {
     const raw = env('JIRA_PR_IGNORE_CHECKS') || cfg.pr_check?.ignore_checks || '';
     return raw.split(',').map(s => s.trim()).filter(Boolean);
   })(),
-  prCheckIgnoreAuthors: (() => {
-    const raw = env('JIRA_PR_IGNORE_AUTHORS') || cfg.pr_check?.ignore_authors || '';
+  // PR checker: CI checks whose FAILURE triggers an auto-move to clarification
+  // for code rework (comma-separated, case-insensitive).
+  prReworkChecks: (() => {
+    const raw = env('JIRA_PR_REWORK_CHECKS') || cfg.pr_check?.rework_checks || '';
     return raw.split(',').map(s => s.trim()).filter(Boolean);
   })(),
+
 
   // Test runner (opt-in, default off)
   test: {

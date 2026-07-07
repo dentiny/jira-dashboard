@@ -84,7 +84,7 @@ Output ONLY valid JSON — no markdown, no explanation, no code fences:
 
 CRITICAL: Only address the actionable failures listed below (FAILURE/ERROR checks that require code changes). Explicitly IGNORE any checks marked as "ignore" — they are pending, non-actionable, or require human intervention (approvals, release notes, etc.) and are outside your scope.
 
-CRITICAL: Do NOT use the \`gh\` CLI or any GitHub API. Do NOT attempt to modify PR descriptions, labels, reviewers, or any GitHub metadata. You are only allowed to edit code and commit locally — same as a regular implementation ticket.
+CRITICAL: You MAY use \`gh\` CLI to READ PR comments and check status. You MUST NOT modify any PR metadata (descriptions, labels, reviewers, titles, comments) via \`gh\` or any other tool. Only edit code and commit locally.
 
 CRITICAL: Continue working on the current branch. Your previous session context (the implementation plan, code written, and your reasoning) is preserved — use it to understand what was already done and what needs to change. Do NOT re-implement from scratch or create a new branch.
 
@@ -97,9 +97,15 @@ Write your structured output to the file specified in the context. The file must
 - Do NOT output the JSON in your response — only write it to the file.`,
   prTasks: `You are addressing GitHub PR tasks for a ${PNAME} ticket. The PR has checks that need attention.
 
-CRITICAL: Do NOT make any code changes. Do NOT edit any files. Only use the \`gh\` CLI.
+CRITICAL: Do NOT make any code changes. Do NOT edit any files. You may use tools (including the \`gh\` CLI) to investigate checks, but you must not modify any code.
 
-Read the context file for PR details. Use \`gh\` to resolve the checks listed. Only act on items you can actually resolve with \`gh\` — skip items that are purely administrative or process gates (e.g. code owner approval, release notes). For pending checks, investigate what's blocking them and take available action (e.g. re-trigger, request reviewers, add labels, comment).`,
+Use \`gh\` to investigate and address checks. For each pending check, query the check details using \`gh pr view {pr} --json statusCheckRollup\` or \`gh api\` to get the check's targetUrl, description, and output summary. Investigate the root cause of the pending state — a check stuck in PENDING may mean the job was never launched and needs an external trigger, or it may be legitimately in progress. Take available action to resolve it (e.g. re-trigger, add labels, request reviewers, comment). Do not skip a check without first determining why it is still pending.
+
+REWORK means changing code. If you determine that any of the checks listed in the context require actual code changes to resolve, include them in the rework_checks array in your JSON output. Do NOT attempt code changes yourself — they will be handled in a separate code rework flow.
+
+Use the Write tool to write the JSON to the output file path specified in the context. The file must contain valid JSON conforming to the referenced schema.
+
+Do NOT output the JSON in your response — only write it to the file.`,
 
   suggest: `First, understand what this project actually is and does. Explore the codebase: read the README, look at the top-level directory structure, and skim the main modules and any docs/ to grasp the project's purpose, domain, and current capabilities. Then read the context file referenced below — if it contains a project vision, treat that as the primary guide for where the project is headed; if the vision section is empty, infer the project's direction from the codebase itself.
 

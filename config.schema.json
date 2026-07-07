@@ -108,6 +108,22 @@
       "enum": ["cherry-pick", "pr"],
       "default": "cherry-pick"
     },
+    "pr_check": {
+      "description": "PR check classification rules. Also configurable via JIRA_PR_IGNORE_CHECKS and JIRA_PR_REWORK_CHECKS in .env.",
+      "type": "object",
+      "properties": {
+        "ignore_checks": {
+          "description": "Comma-separated check names to fully ignore (never shown to coder).",
+          "type": "string",
+          "default": ""
+        },
+        "rework_checks": {
+          "description": "Comma-separated check names whose FAILURE triggers auto-move to clarification for code rework.",
+          "type": "string",
+          "default": ""
+        },
+      }
+    },
     "remoteHost": {
       "description": "SSH hostname for VSCode/Cursor remote URIs. Override with REMOTE_HOST in .env.",
       "type": "string",
