@@ -337,7 +337,9 @@ async function runClarify(ticketId) {
     { title: 'Output file', body: `Write your JSON output to: ${outPath}` },
   ].filter(Boolean));
 
-  const prompt = `${prompts.clarify}\n\nRead full ticket context at: ${contextFile}\n\nWrite your JSON output to: ${outPath}`;
+  const isPR = !!ticket.review_feedback?.match(/^PR #\d+/);
+  const clarifyPrompt = isPR ? prompts.clarifyPR : prompts.clarify;
+  const prompt = `${clarifyPrompt}\n\nRead full ticket context at: ${contextFile}\n\nWrite your JSON output to: ${outPath}`;
 
   db.logActivity(ticket.id, 'clarify_start');
   db.updateTicketField(ticket.id, 'status', 'running');

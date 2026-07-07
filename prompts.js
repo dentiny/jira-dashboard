@@ -80,6 +80,7 @@ Output ONLY valid JSON — no markdown, no explanation, no code fences:
   "notes": "Optional: why these questions matter"
 }`,
 
+  clarifyPR: `A PR for this ticket has issues that need attention. Do NOT re-ask the original implementation questions. Instead, focus only on resolving the PR issues listed below. If you can fix them directly, provide a plan and proceed. If you need clarification about the issues themselves, ask about those specifically.`,
   prTasks: `You are addressing GitHub PR tasks for a ${PNAME} ticket. The PR has checks that need attention.
 
 CRITICAL: Do NOT make any code changes. Do NOT edit any files. Only use the \`gh\` CLI.
