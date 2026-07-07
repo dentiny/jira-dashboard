@@ -115,7 +115,7 @@ async function pushAndOpenPr(ticketId, branchName, title, worktreePath) {
   const cmdTimeout = config.coder.timeouts.command;
   const register = (proc) => runningProcs.set(ticketId, proc);
   try {
-    await execAsync(`git push origin ${branchName}`, worktreePath, pushTimeout, register);
+    await execAsync(`git push --force origin ${branchName}`, worktreePath, pushTimeout, register);
     if (ticketGone(ticketId)) return;
     db.logActivity(ticketId, 'branch_pushed', `Pushed ${branchName} to origin`);
 
