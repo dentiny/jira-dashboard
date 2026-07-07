@@ -63,6 +63,7 @@ interface T {
   latest_test?: TestRun | null
   behind_count?: number | null
   pr_state?: string | null
+  pr_tasks_only?: number | null
 }
 
 type Sug = { id: string; title: string; content: string }
@@ -1846,7 +1847,7 @@ export default function App() {
                     <RefreshCw className="h-3.5 w-3.5" /> Retry
                   </Btn>
                 )}
-                {sel.review_feedback && sel.status !== 'running' && (
+                {sel.stage === 'pr_opened' && sel.pr_tasks_only && sel.status !== 'running' && cfg.mergeStrategy === 'pr' && (
                   <Btn variant="secondary" onClick={() => handlePrTasks(sel.id)}>
                     <ExternalLink className="h-3.5 w-3.5" /> Address PR
                   </Btn>

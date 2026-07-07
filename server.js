@@ -492,7 +492,7 @@ app.post('/api/tickets/:id/answer', async (req, res) => {
 app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
   const ticket = db.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-  if (ticket.stage !== 'clarification' && ticket.stage !== 'pr_opened') {
+  if (ticket.stage !== 'pr_opened') {
     return res.status(400).json({ error: `Ticket is in ${ticket.stage} stage` });
   }
   if (ticket.status === 'running') return res.status(409).json({ error: 'Already processing, wait for completion' });
@@ -518,7 +518,7 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
       }
     };
     await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress, cwd: config.projectDir });
-    db.updateTicketField(ticket.id, 'status', 'idle');
+    db.updateTicket(ticket.id, { status: 'idle', pr_tasks_only: 0 });
     db.logActivity(ticket.id, 'pr_tasks_done', 'PR tasks addressed');
     res.json({ success: true, ticket: db.getTicket(ticket.id) });
   } catch (err) {

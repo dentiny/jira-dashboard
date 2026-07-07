@@ -96,6 +96,9 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN base_sha TEXT`); } catch {}
 // Migration: add coder_pgid column (process group ID for orphan cleanup)
 try { db.exec(`ALTER TABLE tickets ADD COLUMN coder_pgid INTEGER`); } catch {}
 
+// Migration: add pr_tasks_only column (non-actionable PR items flag)
+try { db.exec(`ALTER TABLE tickets ADD COLUMN pr_tasks_only INTEGER DEFAULT 0`); } catch {}
+
 // ── Prepared statements ───────────────────────────────────
 const stmts = {
   // Tickets
@@ -252,6 +255,7 @@ function createTicket(data) {
     estimated_complexity: null,
     plan_notes: null,
     coder_pgid: null,
+    pr_tasks_only: 0,
   };
   const t = { ...defaults, ...data };
   stmts.insertTicket.run(t);
