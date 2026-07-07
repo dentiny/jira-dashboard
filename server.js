@@ -163,16 +163,6 @@ async function finishImplement(ticketId, worktreePath, runTokens, onProgress) {
   });
   db.logActivity(ticket.id, 'token_usage', JSON.stringify(tokens));
 
-  for (const cmd of [`diff --quiet`, `diff --cached --quiet`]) {
-    try { runGit(cmd, worktreePath); } catch {
-      db.logActivity(ticket.id, 'commit_retry', 'Uncommitted changes — asking coder to commit');
-      await runCoder(ticket.id,
-        `You made changes but didn't commit. Review and commit ALL changes with clear messages. Don't make new changes — only commit what exists. Do NOT push to any remote. Only commit locally.`,
-        { timeout: config.coder.timeouts.command, onProgress });
-      break;
-    }
-  }
-
   let commitSha = commitWorktreeChanges(worktreePath, ticket.id, `${ticket.id}: implement`);
   if (!commitSha) {
     try { commitSha = runGit(`rev-parse HEAD`, worktreePath); } catch {}
