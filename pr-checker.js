@@ -1,6 +1,6 @@
 const { exec } = require('child_process');
 
-function startPrChecker(db, config, sseBroadcast) {
+function startPrChecker(db, config, sseBroadcast, runClarify) {
   const INTERVAL = 180_000; // 3 min
   const prStates = new Map(); // ticketId → state hash
 
@@ -105,6 +105,8 @@ function startPrChecker(db, config, sseBroadcast) {
       db.deleteQuestionsForTicket(tid);
       db.updateTicket(tid, { stage: 'clarification', review_feedback: fullFeedback, plan: null, status: 'idle', pr_tasks_only: 0 });
       db.logActivity(tid, 'pr_feedback', `Moved to clarification:\n${summary}`);
+      // Auto-trigger clarify so the coder generates questions automatically
+      if (runClarify) runClarify(tid);
     }
     sseBroadcast(tid, 'ticket', db.getTicket(tid));
     console.log(`[pr-check] ${tid} — PR #${m[1]} has new activity`);

@@ -16,6 +16,7 @@ const { runGit, execAsync, resolveDiffBase, popStashAndStage, assertWorktreeClea
 const { runTicketTests, buildTestContextForPrompt } = require('./test-runner');
 const { startPrChecker } = require('./pr-checker');
 let _recheckTicket = null;
+let _runClarify = null;
 
 const { PREPUSH_RUN_PREFIX, TEST_RUN_PREFIX, STAGE_LABELS, uid, slugFromTitle, ticketId, formatPlanText, escShell } = helpers;
 
@@ -320,11 +321,10 @@ app.post('/api/tickets', (req, res) => {
 });
 
 // ── Stage 1: Clarification ────────────────────────────────
-app.post('/api/tickets/:id/clarify', async (req, res) => {
-  const ticket = db.getTicket(req.params.id);
-  if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-  if (ticket.stage !== 'clarification') return res.status(400).json({ error: `Ticket is in ${ticket.stage} stage` });
-  if (ticket.status === 'running') return res.status(409).json({ error: 'Already processing, wait for completion' });
+// Shared logic for both the HTTP endpoint and auto-trigger from PR checker.
+async function runClarify(ticketId) {
+  const ticket = db.getTicket(ticketId);
+  if (!ticket || ticket.stage !== 'clarification' || ticket.status === 'running') return;
 
   const fbTitle1 = ticket.review_feedback?.match(/^PR #\d+/) ? 'PR issues' : 'Review feedback from previous implementation';
   const contextFile = writeTicketContext(ticket.id, [
@@ -335,63 +335,73 @@ app.post('/api/tickets/:id/clarify', async (req, res) => {
 
   const prompt = `${prompts.clarify}\n\nRead full ticket context at: ${contextFile}`;
 
+  db.logActivity(ticket.id, 'clarify_start');
+  db.updateTicketField(ticket.id, 'status', 'running');
+  const onProgress = (line) => {
+    if (line.startsWith('[resource] ')) {
+      const detail = line.slice(11);
+      db.logActivity(ticket.id, 'resource', detail, 'clarification');
+      sseBroadcast(ticket.id, 'resource', { detail });
+    } else {
+      sseBroadcast(ticket.id, 'stdout', { text: line });
+    }
+  };
+  const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress });
+  captureSessionId(ticket.id, result.sessionId);
+  db.updateTicketField(ticket.id, 'status', 'idle');
+  const output = result.text;
+
+  let parsed;
   try {
-    db.logActivity(ticket.id, 'clarify_start');
-    db.updateTicketField(ticket.id, 'status', 'running');
-    const onProgress = (line) => {
-      if (line.startsWith('[resource] ')) {
-        const detail = line.slice(11);
-        db.logActivity(ticket.id, 'resource', detail, 'clarification');
-        sseBroadcast(ticket.id, 'resource', { detail });
-      } else {
-        sseBroadcast(ticket.id, 'stdout', { text: line });
-      }
-    };
-    const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress });
-    captureSessionId(ticket.id, result.sessionId);
-    db.updateTicketField(ticket.id, 'status', 'idle');
-    const output = result.text;
+    const jsonMatch = output.match(/\{[\s\S]*\}/);
+    parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { questions: [output] };
+  } catch {
+    parsed = { questions: [output], notes: 'Could not parse structured output' };
+  }
 
-    let parsed;
-    try {
-      const jsonMatch = output.match(/\{[\s\S]*\}/);
-      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { questions: [output] };
-    } catch {
-      parsed = { questions: [output], notes: 'Could not parse structured output' };
-    }
+  const questions = parsed.questions || [];
+  const notes = parsed.notes || '';
 
-    const questions = parsed.questions || [];
-    const notes = parsed.notes || '';
-
-    // If the LLM determined the ticket is straightforward, skip questions
-    // and proceed directly to implementation with the provided plan.
-    if (parsed.ready && (!questions || questions.length === 0)) {
-      const planText = formatPlanText(parsed.plan);
-      db.deleteQuestionsForTicket(ticket.id);
-      db.updateTicket(ticket.id, {
-        plan: planText,
-        estimated_complexity: parsed.estimated_complexity || null,
-        plan_notes: notes || null,
-        stage: 'implementation',
-      });
-      db.logActivity(ticket.id, 'clarified_skip', planText.slice(0, 200));
-      if (parsed.files_to_modify) {
-        db.logActivity(ticket.id, 'files_affected', parsed.files_to_modify.join(', '));
-      }
-      return res.json({ clarified: true, plan: planText, notes, ticket: db.getTicket(ticket.id) });
-    }
-
+  if (parsed.ready && (!questions || questions.length === 0)) {
+    const planText = formatPlanText(parsed.plan);
     db.deleteQuestionsForTicket(ticket.id);
-    for (const q of questions) {
-      if (typeof q === 'string') {
-        db.addQuestion(ticket.id, q, null, 1, 'free_text', null);
-      } else {
-        const opts = q.options && Array.isArray(q.options) ? JSON.stringify(q.options) : null;
-        db.addQuestion(ticket.id, q.question, null, 1, q.type || 'free_text', opts);
-      }
+    db.updateTicket(ticket.id, {
+      plan: planText,
+      estimated_complexity: parsed.estimated_complexity || null,
+      plan_notes: notes || null,
+      stage: 'implementation',
+    });
+    db.logActivity(ticket.id, 'clarified_skip', planText.slice(0, 200));
+    if (parsed.files_to_modify) {
+      db.logActivity(ticket.id, 'files_affected', parsed.files_to_modify.join(', '));
     }
-    if (notes) db.logActivity(ticket.id, 'clarify_notes', notes);
+    return { clarified: true, plan: planText, notes };
+  }
 
+  db.deleteQuestionsForTicket(ticket.id);
+  for (const q of questions) {
+    if (typeof q === 'string') {
+      db.addQuestion(ticket.id, q, null, 1, 'free_text', null);
+    } else {
+      const opts = q.options && Array.isArray(q.options) ? JSON.stringify(q.options) : null;
+      db.addQuestion(ticket.id, q.question, null, 1, q.type || 'free_text', opts);
+    }
+  }
+  if (notes) db.logActivity(ticket.id, 'clarify_notes', notes);
+  return { clarified: false };
+}
+
+app.post('/api/tickets/:id/clarify', async (req, res) => {
+  const ticket = db.getTicket(req.params.id);
+  if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+  if (ticket.stage !== 'clarification') return res.status(400).json({ error: `Ticket is in ${ticket.stage} stage` });
+  if (ticket.status === 'running') return res.status(409).json({ error: 'Already processing, wait for completion' });
+
+  try {
+    const result = await runClarify(ticket.id);
+    if (result?.clarified) {
+      return res.json({ clarified: true, plan: result.plan, notes: result.notes, ticket: db.getTicket(ticket.id) });
+    }
     res.json(db.getTicket(ticket.id));
   } catch (err) {
     db.logActivity(ticket.id, 'clarify_error', err.message);
@@ -1354,5 +1364,6 @@ app.listen(PORT, '0.0.0.0', () => {
   if (suggestions.length < SUGGESTIONS_MAX) generateSuggestions();
 
   // Periodic PR checker — scans pr_opened tickets for new failures/reviews
-  _recheckTicket = startPrChecker(db, config, sseBroadcast).recheckTicket;
+  const _runClarify = (tid) => { try { runClarify(tid); } catch {} };
+  _recheckTicket = startPrChecker(db, config, sseBroadcast, _runClarify).recheckTicket;
 });
