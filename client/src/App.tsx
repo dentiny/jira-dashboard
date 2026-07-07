@@ -1847,11 +1847,6 @@ export default function App() {
                     <RefreshCw className="h-3.5 w-3.5" /> Retry
                   </Btn>
                 )}
-                {sel.stage === 'pr_opened' && sel.pr_tasks_only && sel.status !== 'running' && cfg.mergeStrategy === 'pr' && (
-                  <Btn variant="secondary" onClick={() => handlePrTasks(sel.id)}>
-                    <ExternalLink className="h-3.5 w-3.5" /> Address PR
-                  </Btn>
-                )}
                 {sel.questions.some(q => !q.answer) && (
                   <Btn onClick={submit} disabled={busy || sel.status === 'running'}>
                     {busy || sel.status === 'running' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -1865,6 +1860,11 @@ export default function App() {
                   </Btn>
                 )}
               </>
+            )}
+            {sel.stage === 'pr_opened' && sel.pr_tasks_only && sel.status !== 'running' && cfg.mergeStrategy === 'pr' && (
+              <Btn variant="secondary" onClick={() => handlePrTasks(sel.id)}>
+                <ExternalLink className="h-3.5 w-3.5" /> Address PR
+              </Btn>
             )}
             {sel.stage === 'ready' && sel.worktree_path && sel.status !== 'running' && (
               <Btn variant="outline" onClick={() => rebaseTicket(sel.id)} disabled={rebaseLoading}>
