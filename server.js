@@ -524,7 +524,7 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
     db.updateTicket(ticket.id, { status: 'idle', pr_tasks_only: 0 });
     db.logActivity(ticket.id, 'pr_tasks_done', 'PR tasks addressed');
     if (_recheckTicket) _recheckTicket(ticket.id);
-    res.json({ success: true, ticket: db.getTicket(ticket.id) });
+    res.json(db.getTicket(ticket.id));
   } catch (err) {
     db.logActivity(ticket.id, 'pr_tasks_error', err.message);
     db.updateTicketField(ticket.id, 'status', 'idle');
