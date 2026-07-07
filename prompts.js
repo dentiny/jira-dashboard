@@ -78,11 +78,11 @@ Output ONLY valid JSON — no markdown, no explanation, no code fences:
   "notes": "Optional: why these questions matter"
 }`,
 
-  prTasks: `You are addressing GitHub PR tasks for a ${PNAME} ticket. The PR has issues that need attention.
+  prTasks: `You are addressing GitHub PR tasks for a ${PNAME} ticket. The PR has failing and pending checks that need attention.
 
 CRITICAL: Do NOT make any code changes. Do NOT edit any files. Only use the \`gh\` CLI.
 
-Read the context file for PR details. Use \`gh\` to inspect the PR and resolve the issues.`,
+Read the context file for PR details. Use \`gh\` to inspect the PR and resolve the issues. For pending checks, inspect what's blocking them and take any available action (e.g. re-trigger, request reviewers, add labels).`,
 
   suggest: `First, understand what this project actually is and does. Explore the codebase: read the README, look at the top-level directory structure, and skim the main modules and any docs/ to grasp the project's purpose, domain, and current capabilities. Then read the context file referenced below — if it contains a project vision, treat that as the primary guide for where the project is headed; if the vision section is empty, infer the project's direction from the codebase itself.
 

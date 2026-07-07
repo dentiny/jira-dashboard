@@ -23,9 +23,6 @@ function startPrChecker(db, config, sseBroadcast) {
     const pr = JSON.parse(json);
     if (pr.state !== 'OPEN') return;
 
-    // Separate checks into actionable (code) vs non-actionable (process gates)
-    const allChecks = (pr.statusCheckRollup || []).filter(
-      s => s.state === 'FAILURE' || s.state === 'ERROR');
     const isIgnored = (name) => {
       if (!config.prCheckIgnore) return false;
       for (const pattern of config.prCheckIgnore) {
@@ -33,8 +30,17 @@ function startPrChecker(db, config, sseBroadcast) {
       }
       return false;
     };
-    const actionableFailures = allChecks.filter(s => !isIgnored(s.context));
-    const nonActionableFailures = allChecks.filter(s => isIgnored(s.context));
+
+    // FAILURE/ERROR checks that the coder can address → move to clarification
+    const actionableFailures = (pr.statusCheckRollup || []).filter(
+      s => (s.state === 'FAILURE' || s.state === 'ERROR') && !isIgnored(s.context));
+
+    // PENDING + non-actionable failures → show but stay in pr_opened (Address PR)
+    const showItems = (pr.statusCheckRollup || []).filter(s => {
+      if (s.state === 'FAILURE' || s.state === 'ERROR') return isIgnored(s.context);
+      if (s.state === 'PENDING') return true;
+      return false;
+    });
 
     const changeRequested = (pr.reviews || []).filter(
       r => r.state === 'CHANGES_REQUESTED');
@@ -46,8 +52,15 @@ function startPrChecker(db, config, sseBroadcast) {
       return true;
     });
 
-    const totalItems = actionableFailures.length + nonActionableFailures.length + changeRequested.length + newComments.length;
-    if (totalItems === 0) return;
+    const totalItems = actionableFailures.length + showItems.length + changeRequested.length + newComments.length;
+    if (totalItems === 0) {
+      if (t.pr_tasks_only) {
+        db.updateTicket(tid, { pr_tasks_only: 0, review_feedback: null });
+        db.logActivity(tid, 'pr_feedback', `PR #${m[1]} all clear — flags reset`);
+        sseBroadcast(tid, 'ticket', db.getTicket(tid));
+      }
+      return;
+    }
 
     const sig = JSON.stringify({ actionableFailures, nonActionableFailures, changeRequested, newComments });
     const prev = prStates.get(tid);
@@ -57,8 +70,8 @@ function startPrChecker(db, config, sseBroadcast) {
     const addrs = actionableFailures.length + changeRequested.length + newComments.length;
     const parts = [];
     if (addrs === 0) {
-      // Only non-actionable items → stay in pr_opened, flag for Address PR
-      for (const f of nonActionableFailures) {
+      // Only show items (pending + non-actionable) → stay in pr_opened, flag for Address PR
+      for (const f of showItems) {
         const link = f.targetUrl ? ` (${f.targetUrl})` : '';
         parts.push(`  • ${f.context} — ${f.state}${link}`);
       }
@@ -70,6 +83,10 @@ function startPrChecker(db, config, sseBroadcast) {
       // Has actionable items → move to clarification
       parts.push(`PR #${m[1]} needs attention:`);
       for (const f of actionableFailures) {
+        const link = f.targetUrl ? ` (${f.targetUrl})` : '';
+        parts.push(`  • ${f.context} — ${f.state}${link}`);
+      }
+      for (const f of showItems) {
         const link = f.targetUrl ? ` (${f.targetUrl})` : '';
         parts.push(`  • ${f.context} — ${f.state}${link}`);
       }
