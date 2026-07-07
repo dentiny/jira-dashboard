@@ -62,7 +62,7 @@ function startPrChecker(db, config, sseBroadcast) {
       return;
     }
 
-    const sig = JSON.stringify({ actionableFailures, nonActionableFailures, changeRequested, newComments });
+    const sig = JSON.stringify({ actionableFailures, showItems, changeRequested, newComments });
     const prev = prStates.get(tid);
     if (prev === sig) return;
     prStates.set(tid, sig);
