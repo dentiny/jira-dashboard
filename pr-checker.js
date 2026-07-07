@@ -69,7 +69,7 @@ function startPrChecker(db, config, sseBroadcast) {
     } else {
       // Has actionable items → move to clarification
       parts.push(`PR #${m[1]} needs attention:`);
-      for (const f of [...actionableFailures, ...nonActionableFailures]) {
+      for (const f of actionableFailures) {
         const link = f.targetUrl ? ` (${f.targetUrl})` : '';
         parts.push(`  • ${f.context} — ${f.state}${link}`);
       }
