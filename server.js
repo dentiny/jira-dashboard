@@ -827,21 +827,21 @@ app.post('/api/tickets/:id/ready', async (req, res) => {
     const commitMsg = `${ticket.id}: ${ticket.title}`;
     runGit(`add -A`, ticket.worktree_path);
 
-    // Squash against the exact base commit recorded at worktree acquire time.
-    // Using the run-time merge-base against the local branch is unsafe: local
-    // branches can be thousands of commits behind on busy monorepos, and
-    // reset --soft to that stale point would sweep in every intervening file
-    // change as part of this PR's diff.
-    const baseSha = ticket.base_sha;
-    if (baseSha) {
-      try {
-        runGit(`reset --soft ${baseSha}`, ticket.worktree_path);
-        db.logActivity(ticket.id, 'squashed', `All commits squashed to base ${baseSha.slice(0, 7)}`);
-      } catch {
-        db.logActivity(ticket.id, 'squash_skipped', 'Could not reset to recorded base, committing as-is');
+    // PR strategy preserves branch history (e.g. multiple commits or an existing
+    // PR branch).  Other strategies squash into a single commit for clean
+    // cherry-pick / merge into the default branch.
+    if (config.mergeStrategy !== 'pr') {
+      const baseSha = ticket.base_sha;
+      if (baseSha) {
+        try {
+          runGit(`reset --soft ${baseSha}`, ticket.worktree_path);
+          db.logActivity(ticket.id, 'squashed', `All commits squashed to base ${baseSha.slice(0, 7)}`);
+        } catch {
+          db.logActivity(ticket.id, 'squash_skipped', 'Could not reset to recorded base, committing as-is');
+        }
+      } else {
+        db.logActivity(ticket.id, 'squash_skipped', 'No base_sha recorded — committing as-is');
       }
-    } else {
-      db.logActivity(ticket.id, 'squash_skipped', 'No base_sha recorded — committing as-is');
     }
 
     runGit(`commit -m "${escShell(commitMsg)}"`, ticket.worktree_path);
