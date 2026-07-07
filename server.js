@@ -337,6 +337,8 @@ async function runClarify(ticketId) {
 
   db.logActivity(ticket.id, 'clarify_start');
   db.updateTicketField(ticket.id, 'status', 'running');
+  // Start fresh session so the coder treats this as a new clarification round
+  db.updateTicketField(ticket.id, 'ocode_session', null);
   const onProgress = (line) => {
     if (line.startsWith('[resource] ')) {
       const detail = line.slice(11);
