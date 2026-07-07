@@ -1870,7 +1870,7 @@ export default function App() {
                 )}
               </>
             )}
-            {sel.stage === 'pr_opened' && sel.pr_tasks_only && sel.status !== 'running' && cfg.mergeStrategy === 'pr' && (
+            {sel.stage === 'pr_opened' && sel.status !== 'running' && cfg.mergeStrategy === 'pr' && !!sel.pr_tasks_only && (
               <Btn variant="secondary" onClick={() => handlePrTasks(sel.id)}>
                 <ExternalLink className="h-3.5 w-3.5" /> Address PR
               </Btn>
