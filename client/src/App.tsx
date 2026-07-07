@@ -1381,7 +1381,7 @@ export default function App() {
                 {sel.review_feedback && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
                     <p className="t-meta font-semibold text-amber-700 uppercase tracking-wider mb-1">
-                      Review feedback
+                      {sel.review_feedback.match(/^PR #\d+/) ? 'PR Status' : 'Review feedback'}
                     </p>
                     <p className="t-body text-amber-900 leading-relaxed whitespace-pre-wrap">
                       {sel.review_feedback}

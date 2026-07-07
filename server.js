@@ -326,10 +326,11 @@ app.post('/api/tickets/:id/clarify', async (req, res) => {
   if (ticket.stage !== 'clarification') return res.status(400).json({ error: `Ticket is in ${ticket.stage} stage` });
   if (ticket.status === 'running') return res.status(409).json({ error: 'Already processing, wait for completion' });
 
+  const fbTitle1 = ticket.review_feedback?.match(/^PR #\d+/) ? 'PR issues' : 'Review feedback from previous implementation';
   const contextFile = writeTicketContext(ticket.id, [
     { title: 'Ticket title', body: ticket.title },
     { title: 'Ticket description', body: ticket.content },
-    ticket.review_feedback && { title: 'Review feedback from previous implementation', body: ticket.review_feedback },
+    ticket.review_feedback && { title: fbTitle1, body: ticket.review_feedback },
   ].filter(Boolean));
 
   const prompt = `${prompts.clarify}\n\nRead full ticket context at: ${contextFile}`;
@@ -421,11 +422,12 @@ app.post('/api/tickets/:id/answer', async (req, res) => {
     `Q${i + 1}: ${q.question}\nA${i + 1}: ${q.answer || '(no answer yet)'}`
   ).join('\n\n');
 
+  const fbTitle2 = updatedTicket.review_feedback?.match(/^PR #\d+/) ? 'PR issues' : 'Previous review feedback';
   const contextFile = writeTicketContext(updatedTicket.id, [
     { title: 'Ticket title', body: updatedTicket.title },
     { title: 'Ticket description', body: updatedTicket.content },
     { title: 'Clarification Q&A', body: qaText },
-    updatedTicket.review_feedback && { title: 'Previous review feedback', body: updatedTicket.review_feedback },
+    updatedTicket.review_feedback && { title: fbTitle2, body: updatedTicket.review_feedback },
   ].filter(Boolean));
 
   const prompt = `${prompts.evaluate}\n\nRead full ticket context at: ${contextFile}`;
@@ -587,7 +589,7 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
       { title: 'Ticket description', body: ticket.content },
       { title: 'Clarification Q&A', body: qaText },
       { title: 'Implementation plan', body: ticket.plan || '(no plan yet)' },
-      ticket.review_feedback && { title: 'Review feedback from previous implementation', body: ticket.review_feedback },
+      ticket.review_feedback && { title: ticket.review_feedback.match(/^PR #\d+/) ? 'PR issues' : 'Review feedback from previous implementation', body: ticket.review_feedback },
       testContext && { title: 'Most recent test run', body: testContext },
     ].filter(Boolean));
 
