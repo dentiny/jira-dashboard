@@ -284,9 +284,13 @@ function cleanupMock() {
   const output = backend.parseOutput(sampleStdout);
   assert.strictEqual(output.text, 'partial done', 'result text extracted from final event');
   assert.strictEqual(store.lastSessionId, 'sess-abc-123', 'session id stored');
-  assert.strictEqual(store.lastUsage.input, '120', 'input tokens stored');
-  assert.strictEqual(store.lastUsage.output, '60', 'output tokens stored');
-  assert.strictEqual(store.lastUsage.cost, 0.0123, 'cost stored');
+  // Tokens are accumulated by formatProgress during the run; parseOutput
+  // only stores cost from the result event.  The returned tokens object
+  // carries the per-message values for finishImplement.
+  assert.strictEqual(output.tokens?.input, '120', 'returned input tokens');
+  assert.strictEqual(output.tokens?.output, '60', 'returned output tokens');
+  assert.strictEqual(output.tokens?.cost, 0.0123, 'returned cost');
+  assert.strictEqual(store.lastUsage.cost, 0.0123, 'cost stored in store');
 
   // Reset store so subsequent tests (e.g. unknown backend fallback) see the
   // expected baseline of zero usage.

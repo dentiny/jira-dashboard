@@ -62,6 +62,7 @@ interface T {
   stage_resources?: SR
   latest_test?: TestRun | null
   behind_count?: number | null
+  pr_state?: string | null
 }
 
 type Sug = { id: string; title: string; content: string }
@@ -1635,7 +1636,8 @@ export default function App() {
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3.5 flex items-start gap-2.5">
                         <GitPullRequest className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
                         <div className="t-body text-emerald-900">
-                          PR opened ·{' '}
+                          {sel.pr_state === 'merged' ? 'PR merged' : sel.pr_state === 'closed' ? 'PR closed' : 'PR opened'}
+                          {' · '}
                           <a
                             href={resolvePrUrl(sel)!}
                             target="_blank"
@@ -1724,7 +1726,7 @@ export default function App() {
                   <div className="rounded-lg border border-border bg-surface-3 p-3.5 flex items-start gap-2.5">
                     <GitPullRequest className="h-4 w-4 text-ink-3 mt-0.5 shrink-0" />
                     <div className="t-body text-ink-2">
-                      GitHub PR ·{' '}
+                      {sel.pr_state === 'merged' ? 'PR merged' : sel.pr_state === 'closed' ? 'PR closed' : 'PR'}{' · '}
                       <a
                         href={resolvePrUrl(sel)!}
                         target="_blank"

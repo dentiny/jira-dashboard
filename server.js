@@ -221,17 +221,32 @@ app.get('/api/tickets', (req, res) => {
 });
 
 // ── Get single ticket (with resources) ────────────────────
-function getTicketResponse(id) {
+async function getTicketResponse(id) {
   const t = db.getTicket(id);
   if (!t) return null;
   const stageResources = db.getStageResources(id);
   const latestTest = db.getLatestTestRun(id);
   const behindCount = getBranchStaleness(t.worktree_path);
-  return { ...t, stage_resources: stageResources, latest_test: latestTest, behind_count: behindCount };
+  let pr_state = null;
+  if (t.pr_url && t.stage === 'done') {
+    const m = t.pr_url.match(/\/pull\/(\d+)/);
+    if (m) {
+      try {
+        const { exec } = require('child_process');
+        const stdout = await new Promise((res, rej) => {
+          exec(`gh pr view ${m[1]} --json state`, { cwd: config.projectDir, timeout: 5000 },
+            (err, out) => err ? rej(err) : res(out));
+        });
+        const parsed = JSON.parse(stdout);
+        if (parsed?.state) pr_state = parsed.state.toLowerCase();
+      } catch {}
+    }
+  }
+  return { ...t, stage_resources: stageResources, latest_test: latestTest, behind_count: behindCount, pr_state };
 }
 
-app.get('/api/tickets/:id', (req, res) => {
-  const data = getTicketResponse(req.params.id);
+app.get('/api/tickets/:id', async (req, res) => {
+  const data = await getTicketResponse(req.params.id);
   if (!data) return res.status(404).json({ error: 'Ticket not found' });
   res.json(data);
 });
