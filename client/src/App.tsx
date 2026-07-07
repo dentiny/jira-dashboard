@@ -514,10 +514,8 @@ function ResourceMetrics({
   const sr = stageResources
   const r = (activity || []).filter(a => a.action === 'resource')
   const hasLive = r.length > 0 && status === 'running'
-  // Only show finished per-stage breakdowns when NOT running (live mode = clean view)
-  const hasFinished = !hasLive && sr && (sr.clarification || sr.implementation)
-  // Backward compat: old tickets have no per-stage tags but have total
-  const hasLegacyTotal = !hasLive && !hasFinished && sr && sr.total.cpu > 0
+  const hasFinished = sr && (sr.clarification || sr.implementation)
+  const hasLegacyTotal = !hasFinished && sr && sr.total.cpu > 0
 
   if (!hasLive && !hasFinished && !hasLegacyTotal) return null
 
