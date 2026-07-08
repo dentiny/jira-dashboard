@@ -92,9 +92,15 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
     const prev = prStates.get(tid);
     if (prev === sig) {
       db.updateTicketField(tid, 'updated_at', new Date().toISOString());
+      db.touchLatestActivity(tid, 'pr_feedback');
+      sseBroadcast(tid, 'ticket', db.getTicket(tid));
       return;
     }
     prStates.set(tid, sig);
+
+    // Re-check stage — user may have moved ticket since we started
+    const now = db.getTicket(tid);
+    if (!now || now.stage !== 'pr_opened') return;
 
     const needsMove = reworkFailures.length > 0 || changeRequested.length > 0;
 
@@ -178,6 +184,7 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
     const t = db.getTicket(tid);
     if (t && t.stage === 'pr_opened') {
       db.updateTicketField(tid, 'review_feedback', null);
+      sseBroadcast(tid, 'ticket', db.getTicket(tid));
     }
   }
 

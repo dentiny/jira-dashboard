@@ -191,7 +191,7 @@ async function release(ticketId) {
 
   if (isPoolMode() && isPoolWorktree(wt)) {
     await pool.releaseSlot({ worktreePath: wt, branchDefault: config.branchDefault, branchName: bn });
-    db.updateTicket(ticketId, { worktree_path: null, branch_name: null });
+    db.updateTicket(ticketId, { worktree_path: null });
     db.logActivity(ticketId, 'worktree_released', wt || '(none)');
     return;
   }
@@ -208,7 +208,7 @@ async function release(ticketId) {
     try { fs.rmSync(wt, { recursive: true, force: true }); }
     catch (e) { db.logActivity(ticketId, 'cleanup_warn', `rm worktree dir failed (non-fatal): ${e.message}`); }
   }
-  db.updateTicket(ticketId, { worktree_path: null, branch_name: null });
+  db.updateTicket(ticketId, { worktree_path: null });
 }
 
 module.exports = {

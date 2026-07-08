@@ -102,18 +102,25 @@ function run(prompt, opts = {}) {
       onProgress(`[resource] cpu=${data.cpuSec}s mem=${data.memMB}MB threads=${data.threads} elapsed=${data.elapsed}s ncores=${data.ncores}${tokensStr}`);
     });
 
+    let lineBuffer = '';
     proc.stdout.on('data', d => {
       const chunk = d.toString();
       stdout += chunk;
       if (onProgress) {
-        chunk.split('\n').filter(l => l.trim()).forEach(l => {
+        lineBuffer += chunk;
+        const lines = lineBuffer.split('\n');
+        // All but the last element are complete lines (trailing \n means
+        // the last element is empty).  The last element is either a
+        // complete (empty) line or an incomplete fragment — buffer it.
+        lineBuffer = lines.pop() || '';
+        for (const l of lines) {
           const formatted = backend.formatProgress ? backend.formatProgress(l) : null;
           if (formatted !== null) {
             onProgress(formatted);
           } else if (!/^\s*[{[]/.test(l)) {
             onProgress(l);
           }
-        });
+        }
       }
     });
     proc.stderr.on('data', d => { stderr += d.toString(); });
