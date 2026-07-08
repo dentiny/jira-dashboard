@@ -10,15 +10,26 @@ function reloadPrompts() {
   return require('../prompts');
 }
 
-// ── All stages have prompts ────────────────────────────────
+// ── All stage prompts are present and non-trivial ──────────
 (function testAllStagesPresent() {
   const p = reloadPrompts();
-  const stages = ['clarify', 'evaluate', 'implement', 'resolveConflict', 'suggest'];
+  const stages = ['clarify', 'evaluate', 'implement', 'resolveConflict', 'suggest', 'prTasks'];
   for (const s of stages) {
     assert.ok(typeof p[s] === 'string', `${s} prompt should be a string`);
     assert.ok(p[s].length > 50, `${s} prompt should be substantial`);
   }
   console.log('PASS: all stage prompts present and non-trivial');
+})();
+
+// ── prTasks prompt references input JSON (not free-text) ──
+(function testPrTasksReferencesInputJson() {
+  const p = reloadPrompts();
+  const prompt = p.prTasks;
+  assert.ok(prompt.includes('checks input JSON'), 'prTasks prompt should reference the checks input JSON file');
+  assert.ok(prompt.includes('Address ONLY'), 'prTasks prompt should limit scope to listed checks');
+  assert.ok(prompt.includes('rework_checks'), 'prTasks prompt should mention rework_checks output');
+  assert.ok(prompt.includes('touched_checks') || prompt.includes('rework_checks'), 'prTasks prompt should reference output schema fields');
+  console.log('PASS: prTasks prompt references input JSON and output fields');
 })();
 
 // ── Prompts include project name (not "undefined") ─────────

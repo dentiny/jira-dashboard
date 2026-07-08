@@ -126,7 +126,46 @@ const { isWorktreeDirty } = require('../git-utils');
   }
 })();
 
-// ── formatPlanText: extracts readable text from plan ──────
+// ── PR check line parsing ──────────────────────────────────
+(function testPrCheckLineParsing() {
+  // Same regex as in server.js pr-tasks endpoint
+  const checkLineRe = /^\s*•\s+(.+?)\s*—\s+(.+?)(?:\s+\((.+?)\))?\s*$/;
+
+  const m1 = '  • CarBench Status — PENDING'.match(checkLineRe);
+  assert.ok(m1, 'should match check line without URL');
+  assert.strictEqual(m1[1], 'CarBench Status');
+  assert.strictEqual(m1[2], 'PENDING');
+  assert.strictEqual(m1[3], undefined);
+
+  const m2 = '  • Simtest Status — PENDING (http://example.com)'.match(checkLineRe);
+  assert.ok(m2, 'should match check line with URL');
+  assert.strictEqual(m2[1], 'Simtest Status');
+  assert.strictEqual(m2[2], 'PENDING');
+  assert.strictEqual(m2[3], 'http://example.com');
+
+  const m3 = '  • Code Checks — FAILURE (http://build/1)'.match(checkLineRe);
+  assert.ok(m3, 'should match failure check');
+  assert.strictEqual(m3[1], 'Code Checks');
+  assert.strictEqual(m3[2], 'FAILURE');
+
+  const no1 = '  • 2 new comment(s) on the PR'.match(checkLineRe);
+  assert.strictEqual(no1, null, 'comment lines should not match');
+
+  const no2 = 'PR #273092 has tasks that need attention:'.match(checkLineRe);
+  assert.strictEqual(no2, null, 'header lines should not match');
+
+  // Edge cases
+  const m4 = '• Foo — BAR'.match(checkLineRe);
+  assert.ok(m4, 'should match minimal bullet');
+  assert.strictEqual(m4[1], 'Foo');
+
+  const m5 = '  •   Name with spaces   —   STATUS   '.match(checkLineRe);
+  assert.ok(m5, 'should handle extra whitespace');
+  assert.strictEqual(m5[1], 'Name with spaces');
+  assert.strictEqual(m5[2], 'STATUS');
+
+  console.log('PASS: testPrCheckLineParsing');
+})();
 (function testFormatPlanText() {
   assert.strictEqual(formatPlanText('do the thing'), 'do the thing');
   assert.strictEqual(formatPlanText({ plan: 'implement foo' }), 'implement foo');
