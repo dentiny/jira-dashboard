@@ -273,4 +273,116 @@ function linkedWorktrees(repo) {
   }
 })();
 
+// ── clearIndexLock removes stale index.lock without throwing ──
+(function testClearIndexLock() {
+  const repo = makeRepo();
+  const lockPath = path.join(repo, '.git', 'index.lock');
+  try {
+    // No lock file present — should be a no-op.
+    pool.clearIndexLock(repo);
+    assert.ok(!fs.existsSync(lockPath), 'no lock created by clearIndexLock');
+
+    // Stale lock present — should be removed.
+    fs.writeFileSync(lockPath, 'stale lock content');
+    assert.ok(fs.existsSync(lockPath), 'lock file created');
+    pool.clearIndexLock(repo);
+    assert.ok(!fs.existsSync(lockPath), 'clearIndexLock removes stale index.lock');
+
+    // Works for worktree .git files (linked worktrees have .git as a file).
+    const linkedWt = fs.mkdtempSync(path.join(os.tmpdir(), 'jd-linked-'));
+    try {
+      const linkedGitDir = path.join(linkedWt, '.git');
+      fs.writeFileSync(linkedGitDir, 'gitdir: /some/place\n');
+      const linkedLock = path.join(linkedWt, '.git', 'index.lock');
+      // .git is a file, not a dir — path.join('.git', 'index.lock') won't
+      // resolve as expected.  clearIndexLock uses fs.existsSync which
+      // returns false for a file at .git, so this is a no-op (safe).
+      pool.clearIndexLock(linkedWt);
+      assert.ok(fs.existsSync(linkedGitDir), 'linked .git file not removed');
+    } finally {
+      try { fs.rmSync(linkedWt, { recursive: true, force: true }); } catch {}
+    }
+
+    console.log('PASS: clearIndexLock');
+  } finally {
+    cleanupRepo(repo);
+  }
+})();
+
+// ── acquireSlot works despite a stale index.lock ──
+(async function testAcquireSlotWithStaleIndexLock() {
+  const repo = makeRepo();
+  const worktreesDir = path.join(repo, '.worktrees');
+  try {
+    pool.provisionPool({ projectDir: repo, worktreesDir, branchDefault: 'main', count: 1 });
+    const wt = path.join(worktreesDir, 'pool-0');
+
+    // For linked worktrees, .git is a file pointing to the real git dir.
+    // Read it to find where index.lock lives.
+    const gitDir = (() => {
+      const dotGit = path.join(wt, '.git');
+      if (!fs.existsSync(dotGit)) return null;
+      const content = fs.readFileSync(dotGit, 'utf-8').trim();
+      const m = content.match(/^gitdir:\s*(.+)$/m);
+      return m ? m[1] : null;
+    })();
+    if (gitDir) {
+      // Place a stale index.lock in the real git dir.
+      fs.writeFileSync(path.join(gitDir, 'index.lock'), 'stale');
+      assert.ok(fs.existsSync(path.join(gitDir, 'index.lock')), 'stale index.lock placed');
+    }
+
+    // acquireSlot should clear it and succeed.
+    await pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName: 'feature/my-fix' });
+    assert.strictEqual(sh('git rev-parse --abbrev-ref HEAD', wt), 'feature/my-fix',
+      'acquireSlot succeeds despite stale index.lock');
+    if (gitDir) {
+      assert.ok(!fs.existsSync(path.join(gitDir, 'index.lock')),
+        'stale index.lock was cleaned by acquireSlot');
+    }
+
+    console.log('PASS: acquireSlot works despite stale index.lock');
+  } finally {
+    cleanupRepo(repo);
+  }
+})();
+
+// ── releaseSlot works despite a stale index.lock ──
+(async function testReleaseSlotWithStaleIndexLock() {
+  const repo = makeRepo();
+  const worktreesDir = path.join(repo, '.worktrees');
+  try {
+    pool.provisionPool({ projectDir: repo, worktreesDir, branchDefault: 'main', count: 1 });
+    const wt = path.join(worktreesDir, 'pool-0');
+    const branchName = 'feature/stale-release';
+
+    await pool.acquireSlot({ worktreePath: wt, branchDefault: 'main', branchName });
+    assert.strictEqual(sh('git rev-parse --abbrev-ref HEAD', wt), branchName,
+      'precondition: on feature branch');
+
+    // Resolve the real git dir for this linked worktree.
+    const gitDir = (() => {
+      const dotGit = path.join(wt, '.git');
+      const content = fs.readFileSync(dotGit, 'utf-8').trim();
+      const m = content.match(/^gitdir:\s*(.+)$/m);
+      return m ? m[1] : null;
+    })();
+    if (gitDir) {
+      fs.writeFileSync(path.join(gitDir, 'index.lock'), 'stale');
+      assert.ok(fs.existsSync(path.join(gitDir, 'index.lock')), 'stale index.lock placed');
+    }
+
+    // releaseSlot should clear the lock and still detach cleanly.
+    await pool.releaseSlot({ worktreePath: wt, branchDefault: 'main', branchName });
+    assert.strictEqual(sh('git rev-parse --abbrev-ref HEAD', wt), 'HEAD',
+      'releaseSlot succeeds despite stale index.lock');
+    assert.strictEqual(sh('git status --porcelain', wt), '',
+      'released slot is clean despite stale index.lock');
+
+    console.log('PASS: releaseSlot works despite stale index.lock');
+  } finally {
+    cleanupRepo(repo);
+  }
+})();
+
 console.log('\n✅ All worktree-pool tests passed\n');

@@ -56,6 +56,7 @@ function branchNameFor(ticketId) {
 // ceiling the pool uses (worktree-pool ADD_TIMEOUT) rather than the 30s command
 // default, or a big monorepo checkout hits ETIMEDOUT.
 const WORKTREE_ADD_TIMEOUT = 900_000; // 15 min
+const FETCH_TIMEOUT = 600_000; // 10 min
 
 // git in the main checkout (or a given worktree). Mirrors server.js's runGit
 // timeout by default, but with a large buffer so big `git worktree list` /
@@ -132,6 +133,17 @@ async function acquire(ticket) {
       worktreePath = slot.worktreePath;
       db.logActivity(ticket.id, 'worktree_acquired', worktreePath);
       console.log(`[acquire] ${ticket.id} acquired ${worktreePath} base_sha=${slot.baseSha}`);
+      // If the ticket already has a branch on origin (from a previous push),
+      // switch this worktree to that branch instead of the fresh default-base one.
+      if (ticket.branch_name) {
+        try {
+          git(`fetch origin ${ticket.branch_name}`, config.projectDir, FETCH_TIMEOUT);
+          git(`checkout -B ${ticket.branch_name} origin/${ticket.branch_name}`, worktreePath);
+          console.log(`[acquire] ${ticket.id} checked out existing branch ${ticket.branch_name}`);
+        } catch (e) {
+          console.log(`[acquire] ${ticket.id} could not fetch existing branch ${ticket.branch_name}: ${e.message}`);
+        }
+      }
       // Persist the base SHA at acquire time so the ready handler can squash
       // against the exact origin/<default> commit that was used as the branch
       // point, rather than computing a merge-base against a potentially stale

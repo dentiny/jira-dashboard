@@ -86,7 +86,7 @@ CRITICAL: Only address the actionable failures listed below (FAILURE/ERROR check
 
 CRITICAL: You MAY use \`gh\` CLI to READ PR comments and check status. You MUST NOT modify any PR metadata (descriptions, labels, reviewers, titles, comments) via \`gh\` or any other tool. Only edit code and commit locally.
 
-CRITICAL: Work on the branch specified in the context. If a worktree path is provided, use that worktree. Otherwise, use \`gh\` to check out the branch. Do NOT re-implement from scratch or create a new branch.
+CRITICAL: Work on the branch specified in the context. If a worktree path is provided, use that worktree. Do NOT checkout or switch branches in the main project checkout — that checkout must stay on its original branch. Do NOT re-implement from scratch or create a new branch.
 
 Focus only on resolving the PR issues listed below. If you can fix them directly via code changes, provide a plan and proceed to implementation. If you need clarification about the issues themselves, ask about those specifically.
 

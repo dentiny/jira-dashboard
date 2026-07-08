@@ -140,6 +140,7 @@ function provisionPool({ projectDir, worktreesDir, branchDefault, count }) {
 //   4. verify the worktree is clean — if reset was interrupted, fail fast
 //      rather than letting the coder's `git add -A` sweep in partial state.
 async function acquireSlot({ worktreePath, branchDefault, branchName, remote = 'origin' }) {
+  clearIndexLock(worktreePath);
   try { git('rebase --abort 2>/dev/null', worktreePath); } catch { }
   const base = freshDefaultBase({ cwd: worktreePath, branchDefault, remote });
   const before = git('rev-parse --short HEAD', worktreePath);
@@ -171,8 +172,25 @@ async function acquireSlot({ worktreePath, branchDefault, branchName, remote = '
 // Return a pool worktree to its idle state: clean, detached at the default
 // branch, feature branch deleted. The directory itself is preserved for reuse.
 // Async so the event loop stays responsive during checkout on large repos.
+function clearIndexLock(worktreePath) {
+  // Linked worktrees have .git as a file containing "gitdir: <path>".
+  // Main checkout has .git as a directory.  The index.lock lives alongside
+  // the index in the git dir proper.
+  let gitDir = path.join(worktreePath, '.git');
+  try {
+    if (fs.statSync(gitDir).isFile()) {
+      const content = fs.readFileSync(gitDir, 'utf-8').trim();
+      const m = content.match(/^gitdir:\s*(.+)$/m);
+      if (m) gitDir = m[1];
+    }
+  } catch { return; }
+  const lock = path.join(gitDir, 'index.lock');
+  try { if (fs.existsSync(lock)) fs.unlinkSync(lock); } catch {}
+}
+
 async function releaseSlot({ worktreePath, branchDefault, branchName }) {
   if (!isValidWorktree(worktreePath)) return;
+  clearIndexLock(worktreePath);
   const before = (() => { try { return git('rev-parse --short HEAD', worktreePath); } catch { return '?'; } })();
   try { git('rebase --abort 2>/dev/null', worktreePath); } catch { }
   try { git('reset --hard', worktreePath); } catch { }
@@ -195,4 +213,5 @@ module.exports = {
   provisionPool,
   acquireSlot,
   releaseSlot,
+  clearIndexLock,
 };

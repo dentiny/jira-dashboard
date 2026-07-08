@@ -259,6 +259,7 @@ async function getTicketResponse(id) {
             if (t.stage === 'pr_opened' && (pr_state === 'merged' || pr_state === 'closed')) {
               db.updateTicket(t.id, { stage: 'done' });
               db.logActivity(t.id, 'pr_' + pr_state, `PR ${m[1]} ${pr_state} — auto-transitioned to done`);
+              await worktrees.release(t.id);
             }
           }
         } catch {}
@@ -361,6 +362,20 @@ async function runClarify(ticketId) {
   if (!isPR) {
     db.updateTicketField(ticket.id, 'ocode_session', null);
   }
+
+  // For PR-based tickets without a worktree, acquire one on the existing branch
+  if (isPR && !ticket.worktree_path && ticket.branch_name) {
+    try {
+      const fresh = db.getTicket(ticket.id);
+      const { worktreePath } = await worktrees.acquire(fresh);
+      db.logActivity(ticket.id, 'worktree_reacquired', worktreePath);
+    } catch (e) {
+      db.logActivity(ticket.id, 'worktree_reacquire_failed', e.message);
+    }
+  }
+
+  const ticket2 = db.getTicket(ticket.id);
+  const cwd = ticket2?.worktree_path || config.projectDir;
     const onProgress = (line) => {
       if (line.startsWith('[resource] ')) {
         const detail = line.slice(11);
@@ -370,7 +385,7 @@ async function runClarify(ticketId) {
       sseBroadcast(ticket.id, 'stdout', { text: line });
     }
   };
-  const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress });
+  const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress, cwd });
   captureSessionId(ticket.id, result.sessionId);
   db.updateTicketField(ticket.id, 'status', 'idle');
 
@@ -413,8 +428,13 @@ async function runClarify(ticketId) {
   } catch { /* skip validation if schema file not found */ }
   if (schema) {
     const ajv = new Ajv();
-    if (!ajv.validate(schema, parsed)) throw new Error(
-      `${ajv.errorsText()} — click Clarify to retry`);
+    if (!ajv.validate(schema, parsed)) {
+      const output = fileContent || result.text || '(no output)';
+      const snippet = output.length > 2000 ? output.slice(0, 2000) + '\n... (truncated)' : output;
+      db.logActivity(ticket.id, 'clarify_error_detail', `Coder produced:\n${snippet}`);
+      throw new Error(
+        `Schema validation failed: ${ajv.errorsText()}\n\nRaw coder output:\n${snippet}`);
+    }
   }
 
   const questions = parsed.questions || [];
