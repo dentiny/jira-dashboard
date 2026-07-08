@@ -86,7 +86,7 @@ CRITICAL: Only address the actionable failures listed below (FAILURE/ERROR check
 
 CRITICAL: You MAY use \`gh\` CLI to READ PR comments and check status. You MUST NOT modify any PR metadata (descriptions, labels, reviewers, titles, comments) via \`gh\` or any other tool. Only edit code and commit locally.
 
-CRITICAL: Continue working on the current branch. Your previous session context (the implementation plan, code written, and your reasoning) is preserved — use it to understand what was already done and what needs to change. Do NOT re-implement from scratch or create a new branch.
+CRITICAL: Work on the branch specified in the context. If a worktree path is provided, use that worktree. Otherwise, use \`gh\` to check out the branch. Do NOT re-implement from scratch or create a new branch.
 
 Focus only on resolving the PR issues listed below. If you can fix them directly via code changes, provide a plan and proceed to implementation. If you need clarification about the issues themselves, ask about those specifically.
 
@@ -95,15 +95,19 @@ Write your structured output to the file specified in the context. The file must
 - Use the same schema as a new ticket: "ready" (boolean), "plan" (string, required when ready), "questions" (array of {question, type, options}), "estimated_complexity", "files_to_modify", "notes".
 - Use the Write tool to write the JSON to the output file.
 - Do NOT output the JSON in your response — only write it to the file.`,
-  prTasks: `You are addressing GitHub PR tasks for a ${PNAME} ticket. The PR has checks that need attention.
+  prTasks: `You are addressing GitHub PR tasks for a ${PNAME} ticket.
 
 CRITICAL: Do NOT make any code changes. Do NOT edit any files. You may use tools (including the \`gh\` CLI) to investigate checks, but you must not modify any code.
 
-Use \`gh\` to investigate and address checks. For each pending check, query the check details using \`gh pr view {pr} --json statusCheckRollup\` or \`gh api\` to get the check's targetUrl, description, and output summary. Investigate the root cause of the pending state — a check stuck in PENDING may mean the job was never launched and needs an external trigger, or it may be legitimately in progress. Take available action to resolve it (e.g. re-trigger, add labels, request reviewers, comment). Do not skip a check without first determining why it is still pending.
+Read the PR checks input JSON file specified in the context. It contains:
+- \`checks\`: an array of checks to investigate and resolve. Address ONLY these checks.
+- \`ignored_checks\`: an array of check names you must NEVER investigate, query, or act upon. Skip these completely even if you encounter them via \`gh\` or other tools.
 
-REWORK means changing code. If you determine that any of the checks listed in the context require actual code changes to resolve, include them in the rework_checks array in your JSON output. Do NOT attempt code changes yourself — they will be handled in a separate code rework flow.
+For each check in \`checks\`, investigate the root cause and drive it to a success state, including pending checks. Do not skip a check without first determining why it is still failing or pending and attempting to resolve it.
 
-Use the Write tool to write the JSON to the output file path specified in the context. The file must contain valid JSON conforming to the referenced schema.
+REWORK means changing code. If you determine that any check requires actual code changes to resolve, include it in the rework_checks array with the reason why code changes are needed. Do NOT attempt code changes yourself — they will be handled in a separate code rework flow.
+
+Read the output schema to understand the expected JSON structure. Use the Write tool to write the JSON to the output file path specified in the context.
 
 Do NOT output the JSON in your response — only write it to the file.`,
 
