@@ -11,6 +11,8 @@ const prompts = {
 
 Write your structured output to the file specified in the context. The file must contain valid JSON conforming to: ${PDIR}/.jira-dashboard/clarification.schema.json
 
+IMPORTANT: Before writing, read the schema file and ensure your JSON includes every required field.
+
 - When skipping questions: set "ready" to true, provide a "plan", and set "questions" to an empty array.
 - When asking questions: set "ready" to false and include up to 5 clarifying questions. Keep questions focused on the most critical unknowns — the ticketing system will call you again for another round after the user answers, so you can build on prior answers iteratively rather than covering everything at once.
 - Use the Write tool to write the JSON to the output file.
