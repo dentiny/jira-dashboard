@@ -149,7 +149,9 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
       db.updateTicket(tid, { stage: 'clarification', review_feedback: fullFeedback, plan: null, status: 'idle', pr_rework_needed: 1 });
       db.logActivity(tid, 'pr_feedback', `Moved to clarification:\n${summary}`);
       // Auto-trigger clarify so the coder generates questions automatically
-      if (runClarify) runClarify(tid);
+      if (runClarify) runClarify(tid).catch(err => {
+        console.log(`[pr-check] ${tid} clarify auto-trigger failed: ${err.message}`);
+      });
     }
     sseBroadcast(tid, 'ticket', db.getTicket(tid));
     console.log(`[pr-check] ${tid} — PR #${m[1]} has new activity`);
