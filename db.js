@@ -36,6 +36,7 @@ db.exec(`
     token_input TEXT,
     token_output TEXT,
     coder_pgid INTEGER,
+    pr_touched_checks TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -102,6 +103,9 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN pr_tasks_only INTEGER DEFAULT 0`);
 // Migration: add pr_rework_needed column (1 = code rework needed, 0 = Address PR or no action)
 try { db.exec(`ALTER TABLE tickets ADD COLUMN pr_rework_needed INTEGER DEFAULT 0`); } catch {}
 
+// Migration: add pr_touched_checks column (JSON array of checks the coder took action on)
+try { db.exec(`ALTER TABLE tickets ADD COLUMN pr_touched_checks TEXT`); } catch {}
+
 // ── Prepared statements ───────────────────────────────────
 const stmts = {
   // Tickets
@@ -112,11 +116,11 @@ const stmts = {
     INSERT INTO tickets (id, title, content, stage, plan, worktree_path,
       branch_name, commit_sha, pr_url, review_feedback, status, ocode_session,
       total_cpu, total_elapsed, token_cost, token_input, token_output,
-      estimated_complexity, plan_notes, coder_pgid, pr_rework_needed, created_at, updated_at)
+      estimated_complexity, plan_notes, coder_pgid, pr_rework_needed, pr_touched_checks, created_at, updated_at)
     VALUES (@id, @title, @content, @stage, @plan, @worktree_path,
       @branch_name, @commit_sha, @pr_url, @review_feedback, @status, @ocode_session,
       @total_cpu, @total_elapsed, @token_cost, @token_input, @token_output,
-      @estimated_complexity, @plan_notes, @coder_pgid, @pr_rework_needed, @created_at, @updated_at)
+      @estimated_complexity, @plan_notes, @coder_pgid, @pr_rework_needed, @pr_touched_checks, @created_at, @updated_at)
   `),
   updateTicket: db.prepare(`
     UPDATE tickets SET
@@ -128,7 +132,7 @@ const stmts = {
       token_cost = @token_cost, token_input = @token_input,
       token_output = @token_output,
       estimated_complexity = @estimated_complexity,
-      plan_notes = @plan_notes, coder_pgid = @coder_pgid, pr_rework_needed = @pr_rework_needed, updated_at = @updated_at
+      plan_notes = @plan_notes, coder_pgid = @coder_pgid, pr_rework_needed = @pr_rework_needed, pr_touched_checks = @pr_touched_checks, updated_at = @updated_at
     WHERE id = @id
   `),
   updateTicketField: (field) => db.prepare(`
@@ -159,9 +163,19 @@ const stmts = {
   getActivity: db.prepare(`
     SELECT * FROM activity WHERE ticket_id = ? ORDER BY time DESC LIMIT 500
   `),
+  getStageActivity: db.prepare(`
+    SELECT * FROM activity WHERE ticket_id = ? ORDER BY time DESC
+  `),
 
   clearStageActivity: db.prepare(`
     DELETE FROM activity WHERE ticket_id = ? AND (action = 'resource' OR action = 'stage_summary') AND stage = ?
+  `),
+
+  getLatestActivity: db.prepare(`
+    SELECT id FROM activity WHERE ticket_id = ? AND action = ? ORDER BY time DESC LIMIT 1
+  `),
+  updateActivityTime: db.prepare(`
+    UPDATE activity SET time = ? WHERE id = ?
   `),
 
   // Test runs
@@ -216,6 +230,7 @@ function getTicket(id) {
     input: row.token_input || '',
     output: row.token_output || ''
   } : undefined;
+  row.pr_touched_checks = row.pr_touched_checks ? JSON.parse(row.pr_touched_checks) : null;
   return row;
 }
 
@@ -227,6 +242,7 @@ function getAllTickets() {
       options: q.options ? JSON.parse(q.options) : undefined
     }));
     t.activity = stmts.getActivity.all(t.id);
+    t.pr_touched_checks = t.pr_touched_checks ? JSON.parse(t.pr_touched_checks) : null;
     if (t.token_cost != null) {
       t.token_usage = {
         cost: String(t.token_cost),
@@ -259,6 +275,7 @@ function createTicket(data) {
     plan_notes: null,
     coder_pgid: null,
     pr_rework_needed: 0,
+    pr_touched_checks: null,
   };
   const t = { ...defaults, ...data };
   stmts.insertTicket.run(t);
@@ -305,6 +322,13 @@ function updateQuestionAnswer(questionId, ticketId, answer) {
 
 function logActivity(ticketId, action, detail, stage = null) {
   stmts.insertActivity.run(ticketId, action, detail || '', stage, new Date().toISOString());
+}
+
+function touchLatestActivity(ticketId, action) {
+  const row = stmts.getLatestActivity.get(ticketId, action);
+  if (row) {
+    stmts.updateActivityTime.run(new Date().toISOString(), row.id);
+  }
 }
 
 function nextQuestionId() {
@@ -401,7 +425,7 @@ function _parseCost(s) { return parseFloat((s || '0').replace(/[$,]/g, '')) || 0
 function _emptyBucket() { return { cpu: 0, elapsed: 0, peak_mem: 0, tokens_in: 0, tokens_out: 0, cost: 0, calls: 0 }; }
 
 function getStageResources(ticketId) {
-  const rows = stmts.getActivity.all(ticketId).slice().reverse(); // chronological
+  const rows = stmts.getStageActivity.all(ticketId).slice().reverse(); // chronological
   const parseKv = (s) => Object.fromEntries((s || '').split(' ').map(k => k.split('=')));
 
   const allRes = rows.filter(r => r.action === 'resource');
@@ -448,10 +472,9 @@ function getStageResources(ticketId) {
     buckets[stage].peak_mem = peakMems[stage];
   }
 
-  const summary = { clarification: null, implementation: null, total: _emptyBucket() };
+  const summary = { total: _emptyBucket() };
   for (const [stage, bucket] of Object.entries(buckets)) {
-    if (stage in summary) summary[stage] = bucket;
-    else summary[stage] = bucket;
+    summary[stage] = bucket;
   }
 
   // ── Grand total ──────────────────────────────────────
@@ -478,7 +501,15 @@ function getStageResources(ticketId) {
     }
   }
 
-  return summary;
+  // Convert to array format: buckets[{stage, cpu, elapsed, ...}]
+  const bucketsArr = [];
+  for (const [stage, bucket] of Object.entries(summary)) {
+    if (stage === 'total' || !bucket) continue;
+    bucketsArr.push({ stage, ...bucket });
+  }
+  bucketsArr.sort((a, b) => (a.stage || '').localeCompare(b.stage || ''));
+
+  return { buckets: bucketsArr, total: summary.total };
 }
 
 // ── Migration from JSON ───────────────────────────────────
@@ -570,6 +601,7 @@ module.exports = {
   deleteQuestionsForTicket,
   clearStageActivity,
   logActivity,
+  touchLatestActivity,
   getStageResources,
   nextQuestionId,
   getTicketIds,

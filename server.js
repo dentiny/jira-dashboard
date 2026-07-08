@@ -63,7 +63,8 @@ async function generateConflictClarification(ticket, conflictFiles, gitStatus, r
         sseBroadcast(ticket.id, 'stdout', { text: `[conflict] ${line}` });
       }
     };
-    const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress });
+  const cwd = ticket.worktree_path || config.projectDir;
+  const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress, cwd });
     captureSessionId(ticket.id, result.sessionId);
     db.updateTicketField(ticket.id, 'status', 'idle');
     const output = result.text;
@@ -332,16 +333,26 @@ async function runClarify(ticketId) {
   if (!ticket || ticket.stage !== 'clarification' || ticket.status === 'running') return;
 
   const fbTitle1 = ticket.review_feedback?.match(/^PR #\d+/) ? 'PR issues' : 'Review feedback from previous implementation';
+  const isPR = !!ticket.review_feedback?.match(/^PR #\d+/);
   const outPath = path.join(config.projectDir, '.jira-dashboard', 'tickets', ticket.id, 'clarification.json');
   try { fs.unlinkSync(outPath); } catch {} // clean slate for this round
-  const contextFile = writeTicketContext(ticket.id, [
+  const contextSections = [
     { title: 'Ticket title', body: ticket.title },
     { title: 'Ticket description', body: ticket.content },
     ticket.review_feedback && { title: fbTitle1, body: ticket.review_feedback },
-    { title: 'Output file', body: `Write your JSON output to: ${outPath}` },
-  ].filter(Boolean));
+  ];
+  if (ticket.branch_name) {
+    contextSections.push({ title: 'Branch', body: ticket.branch_name });
+  }
+  if (ticket.pr_url) {
+    contextSections.push({ title: 'PR URL', body: ticket.pr_url });
+  }
+  if (ticket.worktree_path) {
+    contextSections.push({ title: 'Worktree path', body: ticket.worktree_path });
+  }
+  contextSections.push({ title: 'Output file', body: `Write your JSON output to: ${outPath}` });
+  const contextFile = writeTicketContext(ticket.id, contextSections.filter(Boolean));
 
-  const isPR = !!ticket.review_feedback?.match(/^PR #\d+/);
   const clarifyPrompt = isPR ? prompts.clarifyPR : prompts.clarify;
   const prompt = `${clarifyPrompt}\n\nRead full ticket context at: ${contextFile}\n\nWrite your JSON output to: ${outPath}`;
 
@@ -350,11 +361,11 @@ async function runClarify(ticketId) {
   if (!isPR) {
     db.updateTicketField(ticket.id, 'ocode_session', null);
   }
-  const onProgress = (line) => {
-    if (line.startsWith('[resource] ')) {
-      const detail = line.slice(11);
-      db.logActivity(ticket.id, 'resource', detail, 'clarification');
-      sseBroadcast(ticket.id, 'resource', { detail });
+    const onProgress = (line) => {
+      if (line.startsWith('[resource] ')) {
+        const detail = line.slice(11);
+        db.logActivity(ticket.id, 'resource', detail, 'clarification');
+        sseBroadcast(ticket.id, 'resource', { detail });
     } else {
       sseBroadcast(ticket.id, 'stdout', { text: line });
     }
@@ -567,24 +578,53 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
     for (const re of reworkPatterns) { if (re.test(line)) return true; }
     return false;
   };
-  const actionableFeedback = !ticket.review_feedback ? null :
-    ticket.review_feedback.split('\n').filter(l => !isFilteredLine(l)).join('\n');
+  const actionableLines = !ticket.review_feedback ? [] :
+    ticket.review_feedback.split('\n').filter(l => !isFilteredLine(l));
+
+  // Parse check lines into structured JSON
+  const checkLineRe = /^\s*•\s+(.+?)\s*—\s+(.+?)(?:\s+\((.+?)\))?\s*$/;
+  const checks = [];
+  for (const line of actionableLines) {
+    const m = line.match(checkLineRe);
+    if (m) checks.push({ name: m[1].trim(), status: m[2].trim(), targetUrl: m[3] || null });
+  }
+
+  if (checks.length === 0) {
+    // Trigger an immediate PR re-check so feedback is available shortly
+    if (_recheckTicket) _recheckTicket(ticket.id);
+    return res.status(400).json({ error: 'No actionable PR checks found. Triggered a re-check — try again in a few seconds.' });
+  }
+
+  // Write structured input for the coder
+  const ticketDir = config.ticketContextDir(ticket.id);
+  fs.mkdirSync(ticketDir, { recursive: true });
+  const inputPath = path.join(ticketDir, 'pr-tasks-input.json');
+  const inputData = {
+    pr_url: ticket.pr_url,
+    branch: ticket.branch_name,
+    checks,
+    ignored_checks: (config.prCheckIgnore || []).filter(Boolean),
+  };
+  fs.writeFileSync(inputPath, JSON.stringify(inputData, null, 2));
 
   // Use a file-based output contract (same pattern as clarification) so the
   // coder writes structured JSON to a known path rather than embedding it in
   // conversation text.
-  const outPath = path.join(config.projectDir, '.jira-dashboard', 'tickets', ticket.id, 'pr-rework.json');
+  const outPath = path.join(ticketDir, 'pr-rework.json');
   try { fs.unlinkSync(outPath); } catch {} // clean slate
 
   const contextFile = writeTicketContext(ticket.id, [
     { title: 'Ticket title', body: ticket.title },
     { title: 'Ticket description', body: ticket.content },
-    actionableFeedback && { title: 'PR issues to address', body: actionableFeedback },
+    { title: 'PR URL', body: ticket.pr_url || '(none)' },
+    { title: 'Branch', body: ticket.branch_name || '(none)' },
+    { title: 'PR checks to address', body: `See ${inputPath}` },
     { title: 'Output file', body: `Write your JSON output to: ${outPath}` },
   ].filter(Boolean));
 
-  const schemaPath = path.join(config.projectDir, '.jira-dashboard', 'pr-rework.schema.json');
-  const prompt = `${prompts.prTasks}\n\nRead full ticket context at: ${contextFile}\n\nWrite your JSON output to: ${outPath}\nSchema: ${schemaPath}`;
+  const inputSchemaPath = path.join(config.projectDir, '.jira-dashboard', 'pr-tasks-input.schema.json');
+  const outputSchemaPath = path.join(config.projectDir, '.jira-dashboard', 'pr-rework.schema.json');
+  const prompt = `${prompts.prTasks}\n\nRead full ticket context at: ${contextFile}\n\nRead the PR checks to address from: ${inputPath}\nSchema: ${inputSchemaPath}\n\nWrite your JSON output to: ${outPath}\nSchema: ${outputSchemaPath}`;
 
   try {
     db.logActivity(ticket.id, 'pr_tasks_start');
@@ -594,7 +634,7 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
     const onProgress = (line) => {
       if (line.startsWith('[resource] ')) {
         const detail = line.slice(11);
-        db.logActivity(ticket.id, 'resource', detail, 'clarification');
+        db.logActivity(ticket.id, 'resource', detail, 'pr_opened');
         sseBroadcast(ticket.id, 'resource', { detail });
       } else if (line.trim()) {
         sseBroadcast(ticket.id, 'stdout', { text: line });
@@ -602,31 +642,65 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
     };
     const result = await runCoder(ticket.id, prompt, { timeout: config.coder.timeouts.clarify, onProgress, cwd: config.projectDir });
 
+    // Track token usage from the coder run
+    if (result?.tokens) {
+      const t = db.getTicket(ticket.id);
+      if (t) {
+        const tokens = result.tokens;
+        db.updateTicket(ticket.id, {
+          token_cost: (parseFloat(t.token_cost) || 0) + (parseFloat(tokens.cost) || 0),
+          token_input: String((parseInt(t.token_input) || 0) + (parseInt(tokens.input) || 0)),
+          token_output: String((parseInt(t.token_output) || 0) + (parseInt(tokens.output) || 0)),
+        });
+      }
+      db.logActivity(ticket.id, 'token_usage', JSON.stringify(result.tokens));
+    }
+    // Track resource usage from the last resource activity entry
+    const finalTicket = db.getTicket(ticket.id);
+    if (finalTicket) {
+      const lastRes = (finalTicket.activity || []).find(a => a.action === 'resource');
+      if (lastRes) {
+        const p = Object.fromEntries(lastRes.detail.split(' ').map(s => s.split('=')));
+        db.updateTicket(ticket.id, { total_cpu: p.cpu || '0', total_elapsed: p.elapsed || '0' });
+      }
+    }
+
     // ── Parse rework assessment from the output file ──────────
     let reworkList = [];
+    let touchedList = [];
     let fileContent = null;
     try { fileContent = fs.readFileSync(outPath, 'utf-8'); } catch {}
     if (fileContent) {
       try {
         const parsed = JSON.parse(fileContent);
         if (Array.isArray(parsed.rework_checks)) reworkList = parsed.rework_checks.filter(Boolean);
+        if (Array.isArray(parsed.touched_checks)) touchedList = parsed.touched_checks.filter(c => c && c.name);
       } catch {}
     }
     try { fs.unlinkSync(outPath); } catch {}
 
+    const touchedJson = touchedList.length > 0 ? JSON.stringify(touchedList) : null;
+
     if (reworkList.length > 0) {
       // Coder identified checks needing code rework → move to clarification
       const prNum = (ticket.pr_url || '').match(/\/pull\/(\d+)/)?.[1] || '?';
-      const feedback = `PR #${prNum} — checks that need code changes:\n${reworkList.map(c => `  • ${c}`).join('\n')}`;
-      db.updateTicket(ticket.id, { status: 'idle', stage: 'clarification', plan: null, review_feedback: feedback, pr_rework_needed: 1 });
-      db.logActivity(ticket.id, 'pr_tasks_rework', `Rework needed: ${reworkList.join(', ')}`);
+      const reasonText = reworkList.map(c => `  • ${c.name || c} — ${c.reason || ''}`).join('\n');
+      const feedback = `PR #${prNum} — checks that need code changes:\n${reasonText}`;
+      db.updateTicket(ticket.id, { status: 'idle', stage: 'clarification', plan: null, review_feedback: feedback, pr_rework_needed: 1, pr_touched_checks: touchedJson });
+      db.logActivity(ticket.id, 'pr_tasks_rework', `Rework needed: ${reworkList.map(c => c.name || c).join(', ')}`);
       if (_runClarify) _runClarify(ticket.id);
     } else {
-      db.updateTicket(ticket.id, { status: 'idle', pr_rework_needed: 0 });
+      db.updateTicket(ticket.id, { status: 'idle', pr_rework_needed: 0, pr_touched_checks: touchedJson });
       db.logActivity(ticket.id, 'pr_tasks_done', 'PR tasks addressed');
       if (_recheckTicket) _recheckTicket(ticket.id);
     }
-    res.json(db.getTicket(ticket.id));
+    // Log each touched check for observability
+    for (const tc of touchedList) {
+      db.logActivity(ticket.id, 'pr_tasks_touched', `${tc.name} — ${tc.action}: ${tc.result}`);
+    }
+    const final = { ...db.getTicket(ticket.id), stage_resources: db.getStageResources(ticket.id) };
+    sseBroadcast(ticket.id, 'ticket', final);
+    res.json(final);
   } catch (err) {
     db.logActivity(ticket.id, 'pr_tasks_error', err.message);
     db.updateTicketField(ticket.id, 'status', 'idle');
@@ -782,7 +856,7 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
 app.post('/api/tickets/:id/feedback', async (req, res) => {
   const ticket = db.getTicket(req.params.id);
   if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-  if (ticket.stage !== 'review') return res.status(400).json({ error: `Ticket is in ${ticket.stage} stage` });
+  if (ticket.stage !== 'review' && ticket.stage !== 'pr_opened') return res.status(400).json({ error: `Ticket is in ${ticket.stage} stage` });
 
   const { feedback } = req.body;
   if (!feedback || !feedback.trim()) return res.status(400).json({ error: 'Feedback required' });
