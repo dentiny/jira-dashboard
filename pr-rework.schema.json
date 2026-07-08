@@ -6,12 +6,44 @@
   "properties": {
     "rework_checks": {
       "type": "array",
-      "description": "Names of checks that require code changes to resolve. These will trigger an auto-move to clarification for a separate code rework flow.",
+      "description": "Checks that require code changes to resolve. These will trigger an auto-move to clarification for a separate code rework flow.",
       "items": {
-        "type": "string",
-        "description": "Full check name as shown in the PR status checks (e.g. 'Code Checks', 'Simtest Status')"
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Full check name as shown in the PR status checks (e.g. 'Code Checks', 'Simtest Status')"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this check requires code changes to resolve"
+          }
+        },
+        "required": ["name", "reason"]
+      }
+    },
+    "touched_checks": {
+      "type": "array",
+      "description": "Checks the coder took action on that do not require code changes (e.g. re-triggered a CI job, added a label, commented).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Full check name as shown in the PR status checks"
+          },
+          "action": {
+            "type": "string",
+            "description": "What action the coder took (e.g. 're-triggered CI job', 'added label', 'commented on PR')"
+          },
+          "result": {
+            "type": "string",
+            "description": "What happened as a result (e.g. 'job launched', 'label added', 'comment posted')"
+          }
+        },
+        "required": ["name", "action", "result"]
       }
     }
   },
-  "required": ["rework_checks"]
+  "required": ["rework_checks", "touched_checks"]
 }

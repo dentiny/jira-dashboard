@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PR Tasks Input",
+  "description": "Input format for the PR tasks stage. Lists the PR checks the coder must address and which checks are off-limits.",
+  "type": "object",
+  "properties": {
+    "pr_url": {
+      "type": "string",
+      "description": "URL to the GitHub pull request"
+    },
+    "branch": {
+      "type": "string",
+      "description": "Git branch name for the PR"
+    },
+    "checks": {
+      "type": "array",
+      "description": "PR status checks that need attention. The coder must investigate and resolve each one.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Full check name as shown in the PR status checks (e.g. 'CarBench Status', 'Simtest Status')"
+          },
+          "status": {
+            "type": "string",
+            "description": "Current status of the check (e.g. 'PENDING', 'FAILURE', 'ERROR')"
+          },
+          "targetUrl": {
+            "type": "string",
+            "description": "URL to the check's detailed output (may be null)",
+            "default": null
+          }
+        },
+        "required": ["name", "status"]
+      }
+    },
+    "ignored_checks": {
+      "type": "array",
+      "description": "Check names that must NOT be investigated or acted upon. The coder must skip these entirely.",
+      "items": {
+        "type": "string",
+        "description": "Check name pattern (case-insensitive match)"
+      }
+    }
+  },
+  "required": ["checks"]
+}
