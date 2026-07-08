@@ -36,7 +36,7 @@ interface S {
   cpu: number; elapsed: number; peak_mem: number;
   tokens_in: number; tokens_out: number; cost: number; calls: number;
 }
-interface SR { clarification: S|null; implementation: S|null; total: S }
+interface SR { buckets: ({ stage: string } & S)[]; total: S }
 interface TestRun {
   id: number
   ticket_id: string
@@ -64,6 +64,7 @@ interface T {
   behind_count?: number | null
   pr_state?: string | null
   pr_rework_needed?: number | null
+  pr_touched_checks?: { name: string; action: string; result: string }[] | null
 }
 
 type Sug = { id: string; title: string; content: string }
@@ -521,10 +522,17 @@ function ResourceMetrics({
   const sr = stageResources
   const r = (activity || []).filter(a => a.action === 'resource')
   const hasLive = r.length > 0 && status === 'running'
-  const hasFinished = sr && (sr.clarification || sr.implementation)
+  const hasFinished = sr && sr.buckets.length > 0
   const hasLegacyTotal = !hasFinished && sr && sr.total.cpu > 0
 
   if (!hasLive && !hasFinished && !hasLegacyTotal) return null
+
+  const stageLabels: Record<string, string> = {
+    clarification: 'Clarification',
+    implementation: 'Implementation',
+    pr_opened: 'PR Processing',
+  }
+  const labelForStage = (s: string) => stageLabels[s] || s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ')
 
   const p = (s: string) => Object.fromEntries(s.split(' ').map(x => x.split('=')))
   const cur = r.length ? p(r[0].detail) : null
@@ -580,11 +588,10 @@ function ResourceMetrics({
 
   return (
     <div className="space-y-3">
-      {/* Per-stage breakdown (clarification + implementation) */}
-      {hasFinished && (<>
-        {sr.clarification && renderBucket('Clarification', sr.clarification)}
-        {sr.implementation && renderBucket('Implementation', sr.implementation)}
-      </>)}
+      {/* Per-stage breakdown */}
+      {hasFinished && sr.buckets.map(b => (
+        b.cpu > 0 && renderBucket(labelForStage(b.stage), b)
+      ))}
 
       {/* Legacy total (old tickets without per-stage tags) */}
       {hasLegacyTotal && (
@@ -1672,18 +1679,21 @@ export default function App() {
                         </div>
                       </Section>
                     )}
-                    <Section title="Feedback (optional)">
-                      <textarea
-                        value={feedback}
-                        onChange={e => setFeedback(e.target.value)}
-                        name="fb"
-                        placeholder="Send back to clarification with new questions…"
-                        rows={3}
-                        className="w-full rounded-md ring-1 ring-border focus:ring-2 focus:ring-zinc-900/20 px-3 py-2 t-body text-ink-1 placeholder:text-ink-3 resize-none"
-                      />
-                      {error && <p className="t-small text-red-600 mt-1.5">{error}</p>}
-                    </Section>
                   </>
+                )}
+
+                {(sel.stage === 'review' || sel.stage === 'pr_opened') && (
+                  <Section title="Feedback (optional)">
+                    <textarea
+                      value={feedback}
+                      onChange={e => setFeedback(e.target.value)}
+                      name="fb"
+                      placeholder="Send back to clarification with new questions…"
+                      rows={3}
+                      className="w-full rounded-md ring-1 ring-border focus:ring-2 focus:ring-zinc-900/20 px-3 py-2 t-body text-ink-1 placeholder:text-ink-3 resize-none"
+                    />
+                    {error && <p className="t-small text-red-600 mt-1.5">{error}</p>}
+                  </Section>
                 )}
 
                 {/* Done / PR Opened */}
@@ -1831,6 +1841,21 @@ export default function App() {
                   </div>
                 )}
 
+                {/* PR tasks touched checks */}
+                {sel.stage === 'pr_opened' && sel.pr_touched_checks && sel.pr_touched_checks.length > 0 && (
+                  <Section title="PR tasks — actions taken">
+                    <div className="space-y-2">
+                      {sel.pr_touched_checks.map((tc, i) => (
+                        <div key={i} className="rounded-md ring-1 ring-border p-2.5">
+                          <p className="t-meta font-semibold text-ink-2 uppercase tracking-wider mb-0.5">{tc.name}</p>
+                          <p className="t-small text-ink-2"><span className="font-medium">Action:</span> {tc.action}</p>
+                          <p className="t-small text-ink-3"><span className="font-medium">Result:</span> {tc.result}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </Section>
+                )}
+
                 {/* PR tasks console output */}
                 {sel.stage === 'pr_opened' && stdoutLines.length > 0 && (
                   <div className="mt-3 rounded-md ring-1 ring-border bg-zinc-950 text-ink-3 p-3 max-h-64 overflow-y-auto t-mono-12 leading-relaxed whitespace-pre-wrap break-words">
@@ -1887,10 +1912,19 @@ export default function App() {
                 Start Implementation <ArrowRight className="h-3.5 w-3.5" />
               </Btn>
             )}
-            {sel.stage === 'pr_opened' && sel.status !== 'running' && cfg.mergeStrategy === 'pr' && sel.pr_rework_needed === 0 && (
-              <Btn variant="secondary" onClick={() => handlePrTasks(sel.id)}>
-                <ExternalLink className="h-3.5 w-3.5" /> Address PR
-              </Btn>
+            {sel.stage === 'pr_opened' && sel.status !== 'running' && cfg.mergeStrategy === 'pr' && (
+              <>
+                <Btn variant="secondary" onClick={sendFeedback} disabled={busy || !feedback.trim()}>
+                  {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Send Feedback
+                </Btn>
+                {sel.pr_rework_needed === 0 && (
+                  <Btn variant="secondary" onClick={() => handlePrTasks(sel.id)} disabled={!sel.review_feedback}>
+                    {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    <ExternalLink className="h-3.5 w-3.5" /> Address PR
+                  </Btn>
+                )}
+              </>
             )}
             {sel.stage === 'ready' && sel.worktree_path && sel.status !== 'running' && (
               <Btn variant="outline" onClick={() => rebaseTicket(sel.id)} disabled={rebaseLoading}>
