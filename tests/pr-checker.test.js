@@ -24,3 +24,4 @@ mod.startPrChecker(db, config, sse);
 console.log('PASS: startPrChecker accepts db, config, sseBroadcast');
 
 console.log('\n✅ All PR checker tests passed');
+process.exit(0);

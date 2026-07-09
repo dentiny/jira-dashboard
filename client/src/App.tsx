@@ -720,6 +720,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [out, setOut] = useState({ open: false, title: '', text: '', status: '' })
+  const [machineChecks, setMachineChecks] = useState<{ name: string; status: string; detail: string }[]>([])
   const [suggestions, setSuggestions] = useState<Sug[]>([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(true)
   const [suggestionsFailed, setSuggestionsFailed] = useState(false)
@@ -783,7 +784,11 @@ export default function App() {
     localStorage.setItem('theme', next)
   }
 
-  useEffect(() => { fetchJSON<ClientConfig>('/api/config').then(setCfg).catch(() => {}); load(); loadSuggestions(); ensureNotifyPerm(); const i = setInterval(load, 10000); return () => clearInterval(i) }, [load])
+  useEffect(() => {
+    fetchJSON<ClientConfig>('/api/config').then(setCfg).catch(() => {});
+    fetchJSON<{ name: string; status: string; detail: string }[]>('/api/system/checks').then(setMachineChecks).catch(() => {});
+    load(); loadSuggestions(); ensureNotifyPerm(); const i = setInterval(load, 10000); return () => clearInterval(i)
+  }, [load])
 
   // Open ticket from URL hash (#ticket/<id>) on mount, and react to hashchange.
   // Mobile / shared-link flow: pasting the URL opens the right ticket.
@@ -1229,6 +1234,18 @@ export default function App() {
             <p className="t-small text-red-600 mt-2 px-1">{error}</p>
           )}
         </div>
+
+        {/* ── Machine check warnings ── */}
+        {machineChecks.filter(c => c.status !== 'ok').length > 0 && (
+          <div className="mb-5 sm:mb-6 space-y-1">
+            {machineChecks.filter(c => c.status !== 'ok').map(c => (
+              <div key={c.name} className={`flex items-start gap-2 px-3 py-2 rounded-md t-small ${c.status === 'fail' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
+                <span className="font-semibold shrink-0">{c.status === 'fail' ? '✗' : '⚠'}</span>
+                <span><strong>{c.name}:</strong> {c.detail}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* ── Suggested tickets ── */}
         {suggestions.length > 0 && (

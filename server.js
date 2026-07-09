@@ -16,9 +16,11 @@ const { runCoder, killTicketProcess, isClosed, ticketGone, captureSessionId, run
 const { runGit, execAsync, resolveDiffBase, popStashAndStage, assertWorktreeClean, getBranchStaleness, commitWorktreeChanges } = require('./git-utils');
 const { runTicketTests, buildTestContextForPrompt } = require('./test-runner');
 const { startPrChecker } = require('./pr-checker');
+const { runMachineChecks } = require('./machine-checks');
 let _recheckTicket = null;
 let _startWatchingPr = null;
 let _runClarify = null;
+let _systemChecks = [];
 
 const { PREPUSH_RUN_PREFIX, TEST_RUN_PREFIX, STAGE_LABELS, uid, slugFromTitle, ticketId, formatPlanText, escShell } = helpers;
 
@@ -653,7 +655,7 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
 
   let prompt = `${prompts.prTasks}\n\nRead full ticket context at: ${contextFile}\n\nRead the PR checks to address from: ${inputPath}\nSchema: ${inputSchemaPath}\n\nWrite your JSON output to: ${outPath}\nSchema: ${outputSchemaPath}`;
   if (ghCmd) {
-    prompt += `\n\nTo fetch open review comments, run:\n${ghCmd}\n\nThe \`databaseId\` field in the output is the \`comment_id\` to use in resolved_comments.`;
+    prompt += `\n\nRead open review comments:\n${ghCmd}\n(databaseId → comment_id)`;
   }
 
   try {
@@ -1439,6 +1441,8 @@ async function generateSuggestions(retries = 3) {
   console.log(`Suggestion generation exhausted all ${retries} retries`);
 }
 
+app.get('/api/system/checks', (req, res) => res.json(_systemChecks));
+
 app.get('/api/suggestions', (req, res) => res.json(suggestions));
 
 app.post('/api/suggestions/:id/accept', (req, res) => {
@@ -1566,6 +1570,10 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   Project: ${config.projectDir} (${config.projectName})`);
   console.log(`   Coder: ${config.coder.type} (${config.coder.bin})`);
   console.log(`   Data: SQLite at ${path.join(DATA_DIR, 'store.db')}`);
+  _systemChecks = runMachineChecks(config);
+  for (const c of _systemChecks) {
+    if (c.status !== 'ok') console.log(`[machine-check] ${c.status}: ${c.name} — ${c.detail}`);
+  }
   if (suggestions.length < SUGGESTIONS_MAX) generateSuggestions();
 
   // Periodic PR checker — scans pr_opened tickets for new failures/reviews

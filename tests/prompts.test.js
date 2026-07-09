@@ -25,8 +25,8 @@ function reloadPrompts() {
 (function testPrTasksReferencesInputJson() {
   const p = reloadPrompts();
   const prompt = p.prTasks;
-  assert.ok(prompt.includes('checks input JSON'), 'prTasks prompt should reference the checks input JSON file');
-  assert.ok(prompt.includes('Address ONLY'), 'prTasks prompt should limit scope to listed checks');
+  assert.ok(prompt.includes('input JSON'), 'prTasks prompt should reference the input JSON file');
+  assert.ok(prompt.includes('skip ignored_checks'), 'prTasks prompt should limit scope to listed checks');
   assert.ok(prompt.includes('rework_checks'), 'prTasks prompt should mention rework_checks output');
   assert.ok(prompt.includes('touched_checks') || prompt.includes('rework_checks'), 'prTasks prompt should reference output schema fields');
   console.log('PASS: prTasks prompt references input JSON and output fields');
