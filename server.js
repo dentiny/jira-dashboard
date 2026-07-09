@@ -644,7 +644,17 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
 
   const inputSchemaPath = path.join(config.projectDir, '.jira-dashboard', 'pr-tasks-input.schema.json');
   const outputSchemaPath = path.join(config.projectDir, '.jira-dashboard', 'pr-rework.schema.json');
-  const prompt = `${prompts.prTasks}\n\nRead full ticket context at: ${contextFile}\n\nRead the PR checks to address from: ${inputPath}\nSchema: ${inputSchemaPath}\n\nWrite your JSON output to: ${outPath}\nSchema: ${outputSchemaPath}`;
+
+  // Parse PR URL to provide a ready-to-use GraphQL command for reading open review comments
+  const prUrlMatch = (ticket.pr_url || '').match(/^https?:\/\/([^\/]+)\/([^\/]+)\/([^\/]+)\/pull\/(\d+)$/);
+  const ghCmd = prUrlMatch
+    ? `gh api graphql --hostname ${prUrlMatch[1]} -f query='query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){reviewThreads(first:100){nodes{isResolved comments(first:100){nodes{databaseId body path line isMinimized}}}}}}}' -f o=${prUrlMatch[2]} -f n=${prUrlMatch[3]} -F p=${prUrlMatch[4]} --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false).comments.nodes[]'`
+    : null;
+
+  let prompt = `${prompts.prTasks}\n\nRead full ticket context at: ${contextFile}\n\nRead the PR checks to address from: ${inputPath}\nSchema: ${inputSchemaPath}\n\nWrite your JSON output to: ${outPath}\nSchema: ${outputSchemaPath}`;
+  if (ghCmd) {
+    prompt += `\n\nTo fetch open review comments, run:\n${ghCmd}\n\nThe \`databaseId\` field in the output is the \`comment_id\` to use in resolved_comments.`;
+  }
 
   try {
     db.logActivity(ticket.id, 'pr_tasks_start');

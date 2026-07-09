@@ -113,7 +113,7 @@ Two checks may contain comments from the PR:
 
 1. **'PR Comments'** — general PR conversation comments. Use \`gh\` CLI to read them and assess whether any require code changes (report in rework_checks) or are informational (report in touched_checks).
 
-2. **'PR Review OPEN Comments'** — unresolved inline review threads. Use \`gh api\` to read the open review comments. For each open comment:
+2. **'PR Review OPEN Comments'** — unresolved inline review threads. Use the provided \`gh api graphql\` command (appended below) to read the open review comments. For each open comment:
    - If it requires code changes to resolve, include **'PR Review OPEN Comments'** in rework_checks with the specific reason.
    - If it does NOT require code changes, close the review thread (you MAY post an optional reply first) and add it to resolved_comments in the output with the comment_id and optional reply text.
 
