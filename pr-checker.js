@@ -31,11 +31,18 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
 
     const m = t.pr_url.match(/\/pull\/(\d+)/);
     if (!m) return;
+    const prNum = m[1];
+
+    // Parse host/owner/repo from PR URL for subsequent API calls
+    const urlMatch = t.pr_url.match(/^https?:\/\/([^\/]+)\/([^\/]+)\/([^\/]+)\/pull\/\d+$/);
+    const ghHost = urlMatch ? urlMatch[1] : null;
+    const ghOwner = urlMatch ? urlMatch[2] : null;
+    const ghRepo  = urlMatch ? urlMatch[3] : null;
 
     let json;
     try {
       json = await new Promise((res, rej) => {
-        exec(`gh pr view ${m[1]} --json state,reviews,comments,statusCheckRollup`,
+        exec(`gh pr view ${prNum} --json state,reviews,comments,statusCheckRollup`,
           { cwd: config.projectDir, timeout: 15000 },
           (err, out) => err ? rej(err) : res(out));
       });
@@ -43,6 +50,30 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
 
     const pr = JSON.parse(json);
     if (pr.state !== 'OPEN') return;
+
+    // ── Fetch unresolved review threads (non-fatal if fails) ──
+    let openReviewComments = [];
+    if (ghHost && ghOwner && ghRepo) {
+      try {
+        const reviewData = await new Promise((res, rej) => {
+          exec(`gh api graphql --hostname ${ghHost} -f query='query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){reviewThreads(first:100){nodes{isResolved comments(first:100){nodes{databaseId body path line isMinimized}}}}}}}' -f o=${ghOwner} -f n=${ghRepo} -F p=${prNum} --jq '.data.repository.pullRequest.reviewThreads.nodes'`,
+            { cwd: config.projectDir, timeout: 15000 },
+            (err, out) => err ? rej(err) : res(out));
+        });
+        const threads = JSON.parse(reviewData);
+        if (Array.isArray(threads)) {
+          for (const thread of threads) {
+            if (!thread.isResolved) {
+              for (const c of (thread.comments?.nodes || [])) {
+                if (!c.isMinimized) openReviewComments.push(c);
+              }
+            }
+          }
+        }
+      } catch {
+        console.log(`[pr-check] ${tid} — failed to fetch review threads, skipping`);
+      }
+    }
 
     // ── Normalize check fields ──────────────────────────────
     // StatusContext uses context/state; CheckRun uses name/conclusion/status.
@@ -75,7 +106,10 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
     }
 
     if (newComments.length > 0) {
-      showItems.push({ context: 'PR Review Comments', state: `${newComments.length} new comment(s)` });
+      showItems.push({ context: 'PR Comments', state: `${newComments.length} comment(s)` });
+    }
+    if (openReviewComments.length > 0) {
+      showItems.push({ context: 'PR Review OPEN Comments', state: `${openReviewComments.length} open review comment(s)` });
     }
 
     const changeRequested = (pr.reviews || []).filter(
@@ -91,7 +125,7 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
       return;
     }
 
-    const sig = JSON.stringify({ reworkFailures, showItems, changeRequested, newComments });
+    const sig = JSON.stringify({ reworkFailures, showItems, changeRequested, newComments, openReviewComments: openReviewComments.length });
     const prev = prStates.get(tid);
     if (prev === sig) {
       db.updateTicketField(tid, 'updated_at', new Date().toISOString());

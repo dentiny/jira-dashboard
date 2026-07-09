@@ -688,6 +688,7 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
     // ── Parse rework assessment from the output file ──────────
     let reworkList = [];
     let touchedList = [];
+    let resolvedComments = [];
     let fileContent = null;
     try { fileContent = fs.readFileSync(outPath, 'utf-8'); } catch {}
     if (fileContent) {
@@ -695,9 +696,15 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
         const parsed = JSON.parse(fileContent);
         if (Array.isArray(parsed.rework_checks)) reworkList = parsed.rework_checks.filter(Boolean);
         if (Array.isArray(parsed.touched_checks)) touchedList = parsed.touched_checks.filter(c => c && c.name);
+        if (Array.isArray(parsed.resolved_comments)) resolvedComments = parsed.resolved_comments.filter(c => c && c.comment_id);
       } catch {}
     }
     try { fs.unlinkSync(outPath); } catch {}
+
+    // If review comments were resolved without rework, ensure the check is reflected as touched
+    if (resolvedComments.length > 0 && !touchedList.some(c => c.name === 'PR Review OPEN Comments')) {
+      touchedList.push({ name: 'PR Review OPEN Comments', action: 'resolved', result: `Closed ${resolvedComments.length} review comment(s)` });
+    }
 
     const touchedJson = touchedList.length > 0 ? JSON.stringify(touchedList) : null;
 
@@ -717,6 +724,10 @@ app.post('/api/tickets/:id/pr-tasks', async (req, res) => {
     // Log each touched check for observability
     for (const tc of touchedList) {
       db.logActivity(ticket.id, 'pr_tasks_touched', `${tc.name} — ${tc.action}: ${tc.result}`);
+    }
+    // Log each resolved review comment for observability
+    for (const rc of resolvedComments) {
+      db.logActivity(ticket.id, 'pr_comment_resolved', `Comment #${rc.comment_id}: ${rc.reply || '(no reply)'}`);
     }
     const final = { ...db.getTicket(ticket.id), stage_resources: db.getStageResources(ticket.id) };
     sseBroadcast(ticket.id, 'ticket', final);

@@ -101,17 +101,25 @@ Write your structured output to the file specified in the context. The file must
 
 CRITICAL: Do NOT make any code changes. Do NOT edit any files. You may use tools (including the \`gh\` CLI) to investigate checks, but you must not modify any code.
 
-CRITICAL: You MAY use \`gh\` CLI to READ PR comments for context about any check, especially the 'PR Review Comments' check.
+CRITICAL: You MAY use \`gh\` CLI to READ PR comments and use \`gh api\` to reply to and resolve review threads. Do NOT modify any other PR metadata (title, body, labels, reviewers).
 
 Read the PR checks input JSON file specified in the context. It contains:
 - \`checks\`: an array of checks to investigate and resolve. Address ONLY these checks.
 - \`ignored_checks\`: an array of check names you must NEVER investigate, query, or act upon. Skip these completely even if you encounter them via \`gh\` or other tools.
 
-For each check in \`checks\`, investigate the root cause and drive it to a success state, including pending checks. Do not skip a check without first determining why it is still failing or pending and attempting to resolve it. For the 'PR Review Comments' check, use \`gh\` CLI to read the PR's review comments and assess whether any require code changes (report in rework_checks) or are informational (report in touched_checks).
+For each check in \`checks\`, investigate the root cause and drive it to a success state, including pending checks. Do not skip a check without first determining why it is still failing or pending and attempting to resolve it.
+
+Two checks may contain comments from the PR:
+
+1. **'PR Comments'** — general PR conversation comments. Use \`gh\` CLI to read them and assess whether any require code changes (report in rework_checks) or are informational (report in touched_checks).
+
+2. **'PR Review OPEN Comments'** — unresolved inline review threads. Use \`gh api\` to read the open review comments. For each open comment:
+   - If it requires code changes to resolve, include **'PR Review OPEN Comments'** in rework_checks with the specific reason.
+   - If it does NOT require code changes, close the review thread (you MAY post an optional reply first) and add it to resolved_comments in the output with the comment_id and optional reply text.
 
 REWORK means changing code. If you determine that any check requires actual code changes to resolve, include it in the rework_checks array with the reason why code changes are needed. Do NOT attempt code changes yourself — they will be handled in a separate code rework flow.
 
-Read the output schema to understand the expected JSON structure. Use the Write tool to write the JSON to the output file path specified in the context.
+Read the output schema to understand the expected JSON structure — note the resolved_comments field. Use the Write tool to write the JSON to the output file path specified in the context.
 
 Do NOT output the JSON in your response — only write it to the file.`,
 

@@ -43,6 +43,24 @@
         },
         "required": ["name", "action", "result"]
       }
+    },
+    "resolved_comments": {
+      "type": "array",
+      "description": "Open review comments that were resolved without code changes. The coder closes each thread (optionally with a reply) and logs it here.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "comment_id": {
+            "type": "number",
+            "description": "GitHub comment databaseId of the resolved review comment"
+          },
+          "reply": {
+            "type": "string",
+            "description": "Optional reply posted before resolving the thread"
+          }
+        },
+        "required": ["comment_id"]
+      }
     }
   },
   "required": ["rework_checks", "touched_checks"]
