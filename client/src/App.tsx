@@ -65,6 +65,8 @@ interface T {
   pr_state?: string | null
   pr_rework_needed?: number | null
   pr_touched_checks?: { name: string; action: string; result: string }[] | null
+  impl_count?: number | null
+  qa_count?: number | null
 }
 
 type Sug = { id: string; title: string; content: string }
@@ -166,7 +168,8 @@ function IconBtn({ children, label, ...rest }: React.ButtonHTMLAttributes<HTMLBu
 function TicketCard({ t, onOpen, loading, highlighted }: { t: T; onOpen: (id: string) => void; loading?: boolean; highlighted?: boolean }) {
   const meta = STAGE_META[t.stage as Stage]
   const running = t.status === 'running'
-  const qaCount = t.questions?.length || 0
+  const qaCount = t.qa_count || 0
+  const implCount = t.impl_count || 0
   return (
     <button
       onClick={() => { if (!loading) onOpen(t.id) }}
@@ -177,17 +180,24 @@ function TicketCard({ t, onOpen, loading, highlighted }: { t: T; onOpen: (id: st
         {loading && <Loader2 className="h-3.5 w-3.5 text-accent animate-spin" />}
         {!loading && running && <Loader2 className="h-3.5 w-3.5 text-amber-500 animate-spin" />}
       </div>
-      <p className="t-body font-medium text-ink-1 clamp-2 leading-snug">{t.title}</p>
+      <p className="t-body font-medium text-ink-1 clamp-2 leading-snug flex-1">{t.title}</p>
       <div className="flex items-center justify-between pt-1 border-t border-surface-3">
         <div className="flex items-center gap-1.5 t-meta text-ink-2 min-w-0">
           {meta && <span className={`h-1.5 w-1.5 rounded-full ${meta.dot} shrink-0`} />}
           <span className="truncate">{timeAgo(t.updated_at)}</span>
         </div>
-        {qaCount > 0 && (
-          <span className="t-meta text-ink-2 bg-surface-3 px-1.5 py-0.5 rounded shrink-0 ml-2">
-            {qaCount} Q&amp;A
-          </span>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {qaCount > 0 && (
+            <span className="t-meta text-ink-2 bg-surface-3 px-1.5 py-0.5 rounded">
+              {qaCount} Q&amp;A
+            </span>
+          )}
+          {implCount > 0 && (
+            <span className="t-meta text-ink-2 bg-surface-3 px-1.5 py-0.5 rounded">
+              {implCount} impl{implCount === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
       </div>
     </button>
   )

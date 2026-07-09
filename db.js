@@ -110,6 +110,7 @@ try { db.exec(`ALTER TABLE tickets ADD COLUMN pr_touched_checks TEXT`); } catch 
 const stmts = {
   // Tickets
   getTicket: db.prepare(`SELECT * FROM tickets WHERE id = ?`),
+  listTickets: db.prepare(`SELECT id, title, stage, status, updated_at, created_at FROM tickets ORDER BY updated_at DESC`),
   getAllTickets: db.prepare(`SELECT * FROM tickets ORDER BY updated_at DESC`),
   getAllTicketIds: db.prepare(`SELECT id FROM tickets`),
   insertTicket: db.prepare(`
@@ -152,6 +153,8 @@ const stmts = {
     UPDATE questions SET answer = ? WHERE id = ? AND ticket_id = ?
   `),
 
+  countQuestions: db.prepare(`SELECT COUNT(*) as c FROM questions WHERE ticket_id = ?`),
+
   // Questions (bulk)
   deleteQuestions: db.prepare(`DELETE FROM questions WHERE ticket_id = ?`),
 
@@ -166,9 +169,8 @@ const stmts = {
   getStageActivity: db.prepare(`
     SELECT * FROM activity WHERE ticket_id = ? ORDER BY time DESC
   `),
-
-  clearStageActivity: db.prepare(`
-    DELETE FROM activity WHERE ticket_id = ? AND (action = 'resource' OR action = 'stage_summary') AND stage = ?
+  countImplDone: db.prepare(`
+    SELECT COUNT(*) as c FROM activity WHERE ticket_id = ? AND action = 'implement_done'
   `),
 
   getLatestActivity: db.prepare(`
@@ -225,6 +227,7 @@ function getTicket(id) {
     options: q.options ? JSON.parse(q.options) : undefined
   }));
   row.activity = stmts.getActivity.all(id);
+  row.impl_count = stmts.countImplDone.get(id).c;
   row.token_usage = (row.token_cost != null) ? {
     cost: String(row.token_cost),
     input: row.token_input || '',
@@ -235,21 +238,12 @@ function getTicket(id) {
 }
 
 function getAllTickets() {
-  const tickets = stmts.getAllTickets.all();
+  const tickets = stmts.listTickets.all();
   for (const t of tickets) {
-    t.questions = stmts.getQuestions.all(t.id).map(q => ({
-      ...q,
-      options: q.options ? JSON.parse(q.options) : undefined
-    }));
-    t.activity = stmts.getActivity.all(t.id);
-    t.pr_touched_checks = t.pr_touched_checks ? JSON.parse(t.pr_touched_checks) : null;
-    if (t.token_cost != null) {
-      t.token_usage = {
-        cost: String(t.token_cost),
-        input: t.token_input || '',
-        output: t.token_output || ''
-      };
-    }
+    t.questions = [];
+    t.activity = [];
+    t.impl_count = stmts.countImplDone.get(t.id).c;
+    t.qa_count = stmts.countQuestions.get(t.id).c;
   }
   return tickets;
 }
@@ -302,10 +296,6 @@ function deleteTicket(id) {
 
 function deleteQuestionsForTicket(ticketId) {
   stmts.deleteQuestions.run(ticketId);
-}
-
-function clearStageActivity(ticketId, stage) {
-  stmts.clearStageActivity.run(ticketId, stage);
 }
 
 function addQuestion(ticketId, questionText, answer, round, type, options) {
@@ -599,7 +589,6 @@ module.exports = {
   addQuestion,
   updateQuestionAnswer,
   deleteQuestionsForTicket,
-  clearStageActivity,
   logActivity,
   touchLatestActivity,
   getStageResources,
