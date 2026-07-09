@@ -721,6 +721,7 @@ export default function App() {
   const [feedback, setFeedback] = useState('')
   const [out, setOut] = useState({ open: false, title: '', text: '', status: '' })
   const [machineChecks, setMachineChecks] = useState<{ name: string; status: string; detail: string }[]>([])
+  const [machineChecksLoading, setMachineChecksLoading] = useState(true)
   const [suggestions, setSuggestions] = useState<Sug[]>([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(true)
   const [suggestionsFailed, setSuggestionsFailed] = useState(false)
@@ -786,7 +787,7 @@ export default function App() {
 
   useEffect(() => {
     fetchJSON<ClientConfig>('/api/config').then(setCfg).catch(() => {});
-    fetchJSON<{ name: string; status: string; detail: string }[]>('/api/system/checks').then(setMachineChecks).catch(() => {});
+    fetchJSON<{ name: string; status: string; detail: string }[]>('/api/system/checks').then(d => { setMachineChecks(d); setMachineChecksLoading(false); }).catch(() => setMachineChecksLoading(false));
     load(); loadSuggestions(); ensureNotifyPerm(); const i = setInterval(load, 10000); return () => clearInterval(i)
   }, [load])
 
@@ -1235,13 +1236,22 @@ export default function App() {
           )}
         </div>
 
-        {/* ── Machine check warnings ── */}
-        {machineChecks.filter(c => c.status !== 'ok').length > 0 && (
-          <div className="mb-5 sm:mb-6 space-y-1">
+        {/* ── Machine checks ── */}
+        {machineChecksLoading && (
+          <div className="mb-5 sm:mb-6 flex items-center gap-2 text-ink-3 t-small">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Running machine checks…
+          </div>
+        )}
+        {!machineChecksLoading && machineChecks.filter(c => c.status !== 'ok').length > 0 && (
+          <div className="mb-5 sm:mb-6 space-y-2">
             {machineChecks.filter(c => c.status !== 'ok').map(c => (
-              <div key={c.name} className={`flex items-start gap-2 px-3 py-2 rounded-md t-small ${c.status === 'fail' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
-                <span className="font-semibold shrink-0">{c.status === 'fail' ? '✗' : '⚠'}</span>
-                <span><strong>{c.name}:</strong> {c.detail}</span>
+              <div key={c.name} className="bg-surface rounded-lg ring-1 ring-border px-3.5 py-2.5 flex items-start gap-3">
+                <StatusPill kind={c.status === 'fail' ? 'danger' : 'info'}>{c.status === 'fail' ? 'FAIL' : 'WARN'}</StatusPill>
+                <div className="flex-1 min-w-0">
+                  <p className="t-body font-medium text-ink-1">{c.name}</p>
+                  <p className="t-small text-ink-2 mt-0.5">{c.detail}</p>
+                </div>
               </div>
             ))}
           </div>
