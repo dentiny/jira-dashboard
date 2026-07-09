@@ -83,11 +83,11 @@ Adding a new backend is a single file under `coder/<name>.js` exporting `{ name,
 
 ## Status & honest limits
 
-This is a working v0.1 — it's the dashboard we're dogfooding on this very repo.
+This is the dashboard we're dogfooding on this very repo — v0.3 with PR-lifecycle support (Backlog → Clarification → Implementation → Review → PR opened → Done) end to end.
 
 - ✅ Linux + macOS service install (systemd / launchd)
 - ⚠️ Resource monitor is Linux-only (`/proc/<pid>/stat`). macOS falls back to `ps`.
-- ⚠️ Test runner assumes Python (`python -m project.test`). JS / Go / Rust projects need a custom command in `config.json`.
+- Test runner is generic — set `test.command_override` in `config.json` to use any language's test command. Python (`python -m project.test`) is the default.
 - ⚠️ Pre-push hook assumes `gh` CLI for pushing branches. See [`.githooks/`](.githooks/).
 
 See [`docs/todo.md`](docs/todo.md) for the full roadmap. Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
