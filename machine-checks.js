@@ -1,6 +1,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { detectType } = require('./coder');
 
 function isGhUsed(config) {
   // Detect whether the project uses GitHub (and therefore needs gh CLI)
@@ -42,7 +43,8 @@ function runMachineChecks(config) {
 
   // ── Coder permission check ──
   // Different coders have different permission models. Check for known issues.
-  if (config.coder.type === 'claude') {
+  const coderType = detectType(config);
+  if (coderType === 'claude') {
     const settingsPath = path.join(config.projectDir, '.claude', 'settings.json');
     try {
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
