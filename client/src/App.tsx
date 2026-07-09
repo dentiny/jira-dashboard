@@ -1124,6 +1124,15 @@ export default function App() {
       setOut({ open: true, title: 'Pre-push Check', text: 'Error: ' + e.message, status: 'fail' })
     }
   }
+  async function restartServer() {
+    setOut({ open: true, title: 'Restart Server', text: 'Restarting…', status: 'running' })
+    try {
+      const { ok } = await fetchJSON<{ ok: boolean }>('/api/restart', { method: 'POST' })
+      if (ok) setOut({ open: true, title: 'Restart Server', text: 'Server restarted successfully.\n\nThe page will reconnect automatically.', status: 'pass' })
+    } catch (e: any) {
+      setOut({ open: true, title: 'Restart Server', text: 'Error: ' + e.message, status: 'fail' })
+    }
+  }
 
   function copyUrl(id: string) {
     const url = location.origin + location.pathname + '#ticket/' + id
@@ -1180,6 +1189,10 @@ export default function App() {
             <Btn variant="outline" size="sm" onClick={runPrepush} aria-label="Pre-push check">
               <Shield className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Pre-push</span>
+            </Btn>
+            <Btn variant="outline" size="sm" onClick={restartServer} aria-label="Restart server">
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Restart</span>
             </Btn>
             <button onClick={cycleTheme} className="h-7 w-7 inline-flex items-center justify-center rounded-md text-ink-2 hover:text-ink-1 hover:bg-surface-3 transition-colors" aria-label={`Theme: ${theme}`}>
               {theme === 'dark' ? <Moon className="h-3.5 w-3.5" /> : theme === 'light' ? <Sun className="h-3.5 w-3.5" /> : <Monitor className="h-3.5 w-3.5" />}

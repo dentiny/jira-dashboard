@@ -1380,6 +1380,15 @@ app.post('/api/prepush', (req, res) => {
   proc.on('error', err => { fs.appendFileSync(outFile, '\nError: ' + err.message); runResults[runId].status = 'fail'; });
 });
 
+app.post('/api/restart', (req, res) => {
+  res.json({ ok: true });
+  // Respond first, then restart — process.exit will kill this process
+  setTimeout(() => {
+    const { execSync } = require('child_process');
+    try { execSync(`systemctl --user restart jira-dashboard-${config.port}`, { timeout: 5000 }); } catch {}
+  }, 100);
+});
+
 // ── Suggested tickets ──────────────────────────────────────
 let suggestions = [];
 const SUGGESTIONS_MAX = 5;
