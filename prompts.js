@@ -41,7 +41,7 @@ If you have ENOUGH info:
   "notes": "Any assumptions"
 }`,
 
-  implement: `You are implementing changes for a ${PNAME} ticket. Work in the directory referenced below.
+  implement: `You are implementing changes for a ${PNAME} ticket. Your current working directory is the worktree — all file operations (read, edit, write, bash) MUST use paths relative to this directory. Do NOT operate on files in the main project checkout.
 
 Your job:
 1. Read the context file for ticket details (title, content, plan, Q&A, any prior review feedback and test failure tail)
@@ -101,11 +101,13 @@ Write your structured output to the file specified in the context. The file must
 
 CRITICAL: Do NOT make any code changes. Do NOT edit any files. You may use tools (including the \`gh\` CLI) to investigate checks, but you must not modify any code.
 
+CRITICAL: You MAY use \`gh\` CLI to READ PR comments for context about any check, especially the 'PR Review Comments' check.
+
 Read the PR checks input JSON file specified in the context. It contains:
 - \`checks\`: an array of checks to investigate and resolve. Address ONLY these checks.
 - \`ignored_checks\`: an array of check names you must NEVER investigate, query, or act upon. Skip these completely even if you encounter them via \`gh\` or other tools.
 
-For each check in \`checks\`, investigate the root cause and drive it to a success state, including pending checks. Do not skip a check without first determining why it is still failing or pending and attempting to resolve it.
+For each check in \`checks\`, investigate the root cause and drive it to a success state, including pending checks. Do not skip a check without first determining why it is still failing or pending and attempting to resolve it. For the 'PR Review Comments' check, use \`gh\` CLI to read the PR's review comments and assess whether any require code changes (report in rework_checks) or are informational (report in touched_checks).
 
 REWORK means changing code. If you determine that any check requires actual code changes to resolve, include it in the rework_checks array with the reason why code changes are needed. Do NOT attempt code changes yourself — they will be handled in a separate code rework flow.
 

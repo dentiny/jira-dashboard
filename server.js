@@ -777,7 +777,7 @@ app.post('/api/tickets/:id/implement', async (req, res) => {
       testContext && { title: 'Most recent test run', body: testContext },
     ].filter(Boolean));
 
-    const prompt = `${prompts.implement}\n\nRead full ticket context at: ${contextFile}\nWork in: ${worktreePath}`;
+    const prompt = `${prompts.implement}\n\nRead full ticket context at: ${contextFile}\n\nYour current working directory (cwd) is: ${worktreePath}\nThis is a git worktree dedicated to this ticket. All file edits, reads, and git commands MUST use paths relative to this directory — never the main project checkout at ${config.projectDir}.`;
 
     db.logActivity(ticket.id, 'implement_start');
     db.updateTicketField(ticket.id, 'status', 'running');

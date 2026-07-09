@@ -62,6 +62,7 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
     // ── Classify each check into Ignore / Rework / Show ────
     const reworkFailures = []; // FAILURE/ERROR rework checks → trigger code rework
     const showItems = [];      // everything else → Address PR button
+    const newComments = (pr.comments || []).filter(c => !c.isMinimized);
 
     for (const check of (pr.statusCheckRollup || [])) {
       const name = checkName(check);
@@ -73,10 +74,12 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
       }
     }
 
+    if (newComments.length > 0) {
+      showItems.push({ context: 'PR Review Comments', state: `${newComments.length} new comment(s)` });
+    }
+
     const changeRequested = (pr.reviews || []).filter(
       r => r.state === 'CHANGES_REQUESTED');
-
-    const newComments = (pr.comments || []).filter(c => !c.isMinimized);
 
     const totalItems = reworkFailures.length + showItems.length + changeRequested.length + newComments.length;
     if (totalItems === 0) {
@@ -111,9 +114,6 @@ function startPrChecker(db, config, sseBroadcast, runClarify) {
       const parts = [];
       for (const f of showItems) {
         parts.push(showItemLine(f));
-      }
-      if (newComments.length > 0) {
-        parts.push(`  • ${newComments.length} new comment(s) on the PR`);
       }
       const summary = parts.join('\n');
       const header = `PR #${m[1]} has tasks that need attention:\n`;
